@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "upstream_url": "https://github.com/alibaba/MNN.git",
+  "upstream_ref": "refs/heads/master",
+  "engine_base_sha": "024a946b0b8fcf87c8a418229fadd4cd7858ffba",
+  "toolchain": {
+    "java_major": "17",
+    "gradle": "8.9",
+    "gradle_distribution_sha256": "d725d707bfabd4dfdc958c624003b3c80accc03f7037b5122c4b1d0ef15cecab",
+    "agp": "8.7.3",
+    "compile_sdk": "35",
+    "shared_module_compile_sdk": "34",
+    "build_tools": "35.0.0",
+    "ndk": "27.2.12479018",
+    "cmake": "3.22.1",
+    "wrapper_jar_sha256": "498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17",
+    "wrapper_script_sha256": "a3648413b47ef77af21d5ebc36c687c7d103aaef3e17f33de7d4f080a6f300a3"
+  },
+  "sherpa": {
+    "url": "https://meta.alicdn.com/data/mnn/libs/libsherpa-mnn-jni-16k.zip",
+    "archive_sha256": "bbc77673fbd9d2daa7a262dedae26be2f56fc65e22dcf4bb04e37aa37c16c47d",
+    "member": "libsherpa-mnn-jni.so",
+    "source_provenance": "Upstream App auxiliary prebuilt; exact source revision and static dependency closure not supplied by archive"
+  },
+  "expected_apk": {
+    "package": "io.github.naza3.mnnchat",
+    "min_sdk": "26",
+    "target_sdk": "35",
+    "service": "com.alibaba.mnnllm.api.openai.service.OpenAIService",
+    "foreground_service_type": "specialUse",
+    "native_libraries": [
+      "libMNN.so",
+      "libmnnllmapp.so",
+      "libmnn_tts.so",
+      "libsherpa-mnn-jni.so"
+    ],
+    "version_code": "831",
+    "version_name": "0.8.3-localapi.1"
+  }
+}

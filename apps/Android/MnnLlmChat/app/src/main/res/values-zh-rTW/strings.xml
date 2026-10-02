@@ -1,5 +1,6 @@
+<!-- Modified by MNN Chat API contributors, 2026: local-only foreground inference service. -->
 <resources>
-    <string name="app_name">MNN Chat</string>
+    <string name="app_name">MNN Chat API</string>
     <string name="title_activity_main">MainActivity</string>
     <string name="navigation_drawer_open">開啟導覽抽屜</string>
     <string name="navigation_drawer_close">關閉導覽抽屜</string>
@@ -114,8 +115,8 @@
     <string name="settings_complete">強烈建議刪除未完成的下載任務重新開始，否則可能會產生資料不一致的問題。</string>
     <string name="stop_download_tasks_when_chat">對話時停止下載任務</string>
     <string name="stop_download_reason">開啟後，對話時下載任務將會暫停，以減少對話時的卡頓。</string>
-    <string name="enable_api_service">開啟 API 網路服務</string>
-    <string name="enable_api_service_summary">啟動與 OpenAI 相容的 API 伺服器，供外部存取</string>
+    <string name="enable_api_service">本機 API 控制</string>
+    <string name="enable_api_service_summary">手動啟動或停止 API，僅限同一手機呼叫</string>
     <string name="reset_api_config">重設 API 配置</string>
     <string name="reset_api_config_summary">將 API 伺服器設定重設為預設值</string>
     <string name="reset_api_config_confirm_message">確定要重設 API 配置嗎？這將會將所有 API 設定復原為預設值。</string>

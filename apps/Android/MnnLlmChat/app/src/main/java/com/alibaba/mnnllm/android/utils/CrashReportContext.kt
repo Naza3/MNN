@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: enforce disabled telemetry and exclude local API sessions.
 package com.alibaba.mnnllm.android.utils
 
 import com.google.gson.JsonParser
@@ -109,6 +110,8 @@ object CrashReportContext {
 
     @JvmStatic
     fun reportLlmSetConfig(stage: String?, config: String?) {
+        if (!com.alibaba.mnnllm.android.BuildConfig.ENABLE_FIREBASE ||
+            com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) return
         val safeStage = stage?.takeIf { it.isNotBlank() } ?: "unknown"
         val sourceConfig = sanitizeLlmConfigForLog(config)
         val crashKeys = extractLlmConfigCrashKeys(sourceConfig)
@@ -233,6 +236,8 @@ object CrashReportContext {
     )
 
     private inline fun updateSafely(block: FirebaseCrashlytics.() -> Unit) {
+        if (!com.alibaba.mnnllm.android.BuildConfig.ENABLE_FIREBASE ||
+            com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) return
         try {
             FirebaseCrashlytics.getInstance().block()
         } catch (_: Throwable) {

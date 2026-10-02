@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: shared exclusive native-runtime lease.
 // Created by ruoyi.sjd on 2025/5/7.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 
@@ -16,20 +17,33 @@ class DiffusionSession(
 ): ChatSession{
     override var supportOmni: Boolean = false
     private var nativePtr: Long = 0
+    private var releaseFailed = false
+    private val ownerGate = com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate
+    private lateinit var ownerLease: com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnerGate.Lease
+    init { synchronized(ownerGate) { ownerLease = ownerGate.acquireChat { release() } } }
     override val debugInfo: String = ""
     @Volatile
     private var releaseRequested = false
     @Volatile
     private var generating = false
-    
+
+    @Synchronized
     override fun load() {
+        ownerGate.checkAccess(ownerLease)
+        if (nativePtr != 0L) return
+        try {
         nativePtr = initNative(
             configPath,
             DiffusionLoadConfigResolver.buildExtraConfigJson(modelId, configPath)
         )
+        check(nativePtr != 0L) { "Native model initialization failed" }
         Log.d(TAG, "DiffusionSession load nativePtr=$nativePtr configPath=$configPath")
         if (releaseRequested) {
             release()
+        }
+        } catch (error: Throwable) {
+            try { release() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+            throw error
         }
     }
 
@@ -39,7 +53,7 @@ class DiffusionSession(
         progressListener: GenerateProgressListener
     ): HashMap<String, Any> {
         synchronized(this) {
-            Log.d(TAG, "MNN_DEBUG submit$prompt")
+            ownerGate.checkAccess(ownerLease)
             if (nativePtr == 0L) {
                 Log.e(TAG, "Diffusion nativePtr is 0, cannot generate")
                 return hashMapOf<String, Any>(
@@ -57,7 +71,9 @@ class DiffusionSession(
                 output,
                 iterNum,
                 randomSeed,
-                progressListener
+                object : GenerateProgressListener {
+                    override fun onProgress(progress: String?): Boolean = ownerLease.cancelled.get() || progressListener.onProgress(progress)
+                }
             )
             val result: HashMap<String, Any> = nativeResult ?: hashMapOf<String, Any>(
                 "error" to true,
@@ -73,7 +89,8 @@ class DiffusionSession(
 
     private fun releaseInner() {
         if (nativePtr != 0L) {
-            releaseNative(nativePtr)
+            check(!releaseFailed) { "Previous native cleanup was not confirmed" }
+            try { releaseNative(nativePtr) } catch (error: Throwable) { releaseFailed = true; throw error }
             nativePtr = 0
             provide().removeSession(sessionId)
             (this as Object).notifyAll()
@@ -95,19 +112,17 @@ class DiffusionSession(
         return this.sessionId
     }
 
+    @Synchronized
     override fun reset(): String {
+        ownerGate.checkAccess(ownerLease)
         return generateNewSessionId()
     }
 
+    @Synchronized
     override fun release() {
-        synchronized(this) {
-            Log.d(TAG, "MNN_DEBUG release nativePtr: $nativePtr generating: $generating")
-            if (!generating) {
-                releaseInner()
-            } else {
-                releaseRequested = true
-            }
-        }
+        ownerLease.cancelled.set(true)
+        releaseInner()
+        ownerGate.released(ownerLease)
     }
 
     override fun setKeepHistory(keepHistory: Boolean) {

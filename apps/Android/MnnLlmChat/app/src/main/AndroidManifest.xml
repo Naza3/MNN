@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Modified by MNN Chat API contributors, 2026: local-only foreground inference service. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
@@ -17,7 +19,9 @@
 
     <application
         android:name="com.alibaba.mnnllm.android.MnnLlmApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/local_api_data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher"
@@ -45,7 +49,7 @@
         <activity
             android:name="com.alibaba.mnnllm.android.chat.ChatActivity"
             android:configChanges="orientation|screenSize"
-            android:exported="true"
+            android:exported="false"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -56,6 +60,8 @@
         <service
             android:name="com.alibaba.mls.api.download.DownloadForegroundService"
             android:foregroundServiceType="dataSync" />
+
+        <activity android:name="com.alibaba.mnnllm.api.openai.ui.LocalApiActivity" android:exported="false" />
 
         <activity
             android:name=".chat.SelectTextActivity"
@@ -133,8 +139,10 @@
         <service
             android:name="com.alibaba.mnnllm.api.openai.service.OpenAIService"
             android:enabled="true"
-            android:exported="true"
-            android:foregroundServiceType="dataSync" >
+            android:exported="false"
+            android:foregroundServiceType="specialUse" >
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started on-device LLM inference API for local applications; loopback only with a visible stop control" />
         </service>
 
         <receiver

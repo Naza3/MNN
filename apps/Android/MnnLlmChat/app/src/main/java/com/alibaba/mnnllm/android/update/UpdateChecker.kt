@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: local-only foreground inference service.
 // Created by ruoyi.sjd on 2025/2/13.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 package com.alibaba.mnnllm.android.update
@@ -82,6 +83,11 @@ class UpdateChecker(private val context: Context) {
 
     @SuppressLint("LogNotTimber")
     fun checkForUpdates(context: Context, forceCheck: Boolean) {
+        // This fork has an independent package/signing identity. Never offer the official APK.
+        if (BuildConfig.APPLICATION_ID.startsWith("io.github.naza3.mnnchat")) {
+            if (forceCheck) android.widget.Toast.makeText(context, "MNN Chat API: install updates from the fork release page", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
         // Do nothing in Google Play build
         if (BuildConfig.IS_GOOGLE_PLAY_BUILD) {
             return

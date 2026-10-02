@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: local-only foreground inference service.
 // Created by ruoyi.sjd on 2025/5/6.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 
@@ -43,6 +44,7 @@ class ChatPresenter(
     private var sessionName:String? = null
     private var chatDataManager: ChatDataManager? = null
     private lateinit var chatSession: ChatSession
+    private var runtimeLeaseEpoch: Long? = null
     private val presenterScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var generateListener:GenerateListener? = null
     private val additionalListeners = mutableListOf<GenerateListener>()
@@ -130,6 +132,7 @@ class ChatPresenter(
             if (!result.success || result.session == null) {
                 throw IllegalStateException(result.reason ?: "Failed to ensure LLM session")
             }
+            runtimeLeaseEpoch = result.chatLeaseEpoch
             chatSession = result.session!!
         }
         sessionId = chatSession.sessionId
@@ -141,37 +144,43 @@ class ChatPresenter(
 
     fun load() {
         Log.d(TAG, "current SessionId: $sessionId")
+        val sessionForLoad = chatSession
+        val leaseForLoad = runtimeLeaseEpoch
         presenterScope.launch {
             Log.d(TAG, "chatSession loading")
             chatActivity.lifecycleScope.launch {
+                if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
                 chatActivity.onLoadingChanged(true)
             }
             try {
-                if (chatSession is com.alibaba.mnnllm.android.llm.LlmSession &&
-                    (chatSession as com.alibaba.mnnllm.android.llm.LlmSession).isModelLoaded()) {
+                if (sessionForLoad is com.alibaba.mnnllm.android.llm.LlmSession &&
+                    (sessionForLoad as com.alibaba.mnnllm.android.llm.LlmSession).isModelLoaded()) {
                     Log.d(TAG, "chatSession already loaded by LlmRuntimeController, skipping load")
                 } else {
-                    chatSession.load()
+                    sessionForLoad.load()
                 }
                 chatActivity.lifecycleScope.launch {
+                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
                     chatActivity.onLoadingChanged(false)
                 }
                 Log.d(TAG, "chatSession loaded")
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "Model load failed: ${e.message}", e)
-                if (chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
-                    ServiceLocator.getLlmRuntimeController().releaseSession()
+                if (sessionForLoad is com.alibaba.mnnllm.android.llm.LlmSession) {
+                    ServiceLocator.getLlmRuntimeController().releaseSession(sessionForLoad as? com.alibaba.mnnllm.android.llm.LlmSession, leaseForLoad)
                 }
                 chatActivity.lifecycleScope.launch {
+                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
                     chatActivity.onLoadingChanged(false)
                     chatActivity.onModelLoadFailed(e.message ?: "Model load failed")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Model load failed with unexpected error", e)
-                if (chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
-                    ServiceLocator.getLlmRuntimeController().releaseSession()
+                if (sessionForLoad is com.alibaba.mnnllm.android.llm.LlmSession) {
+                    ServiceLocator.getLlmRuntimeController().releaseSession(sessionForLoad as? com.alibaba.mnnllm.android.llm.LlmSession, leaseForLoad)
                 }
                 chatActivity.lifecycleScope.launch {
+                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
                     chatActivity.onLoadingChanged(false)
                     chatActivity.onModelLoadFailed(e.message ?: "Model load failed")
                 }
@@ -180,6 +189,7 @@ class ChatPresenter(
     }
 
     fun reset(onResetSuccess: (newSessionId: String) -> Unit) {
+        if (com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) return
         presenterScope.launch {
             // Don't delete chat data - preserve history for the old session
             // Just reset the session to get a new sessionId
@@ -392,21 +402,16 @@ class ChatPresenter(
     fun destroy() {
         stopGenerate()
         presenterScope.cancel("ChatPresenter destroy")
+        val sessionToRelease = if (::chatSession.isInitialized) chatSession else null
+        val leaseToRelease = runtimeLeaseEpoch
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             try {
-                if (::chatSession.isInitialized) {
-                    if (chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
-                        if (!ServerEventManager.getInstance().isServerRunning()) {
-                            Log.d(TAG, "Final cleanup: Resetting and releasing LlmSession via LlmRuntimeController")
-                            chatSession.reset()
-                            ServiceLocator.getLlmRuntimeController().releaseSession()
-                        } else {
-                            Log.d(TAG, "LlmSession kept alive (API running)")
-                        }
+                if (sessionToRelease != null) {
+                    if (sessionToRelease is com.alibaba.mnnllm.android.llm.LlmSession) {
+                        ServiceLocator.getLlmRuntimeController().releaseSession(sessionToRelease as? com.alibaba.mnnllm.android.llm.LlmSession, leaseToRelease)
                     } else {
                         Log.d(TAG, "Final cleanup: Resetting and releasing non-LLM session")
-                        chatSession.reset()
-                        chatSession.release()
+                        sessionToRelease.release()
                     }
                 }
             } catch (e: Exception) {
@@ -472,7 +477,7 @@ class ChatPresenter(
         if (::chatSession.isInitialized) {
             chatSession.reset()
             if (chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
-                ServiceLocator.getLlmRuntimeController().releaseSession()
+                ServiceLocator.getLlmRuntimeController().releaseSession(getLlmSession(), runtimeLeaseEpoch)
             } else {
                 chatSession.release()
             }
@@ -508,6 +513,7 @@ class ChatPresenter(
         if (!result.success || result.session == null) {
             throw IllegalStateException(result.reason ?: "Failed to ensure LLM session for model switch")
         }
+        runtimeLeaseEpoch = result.chatLeaseEpoch
         val newSession = result.session!!
         chatSession = newSession
         sessionId = newSession.sessionId

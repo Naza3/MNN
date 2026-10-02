@@ -1,0 +1,36 @@
+// Reporting and safety guards only. No source/native stubs or skipped compile tasks.
+import groovy.json.JsonOutput
+import java.security.MessageDigest
+
+def reportDirectory = System.getenv('REPORT_DIR')
+if (!reportDirectory) throw new GradleException('REPORT_DIR is required')
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    app.tasks.matching { it.name == 'downloadAndUnzipNativeLibs' }.configureEach {
+        doFirst {
+            def library = app.file('src/main/jniLibs/arm64-v8a/libsherpa-mnn-jni.so')
+            if (!library.exists()) throw new GradleException('Pinned Sherpa preparation is missing; unverified CDN download is forbidden')
+        }
+    }
+    app.tasks.matching { it.name in ['downloadAndUnzipBuiltinModels', 'copyModelInfoToMarketConfig'] }.configureEach {
+        doFirst { throw new GradleException('CI must never download or bundle models (ADD_BUILTIN=false)') }
+    }
+    app.tasks.register('localApiDependencyInventory') {
+        doLast {
+            def artifacts = app.configurations.getByName('standardReleaseRuntimeClasspath').resolvedConfiguration.resolvedArtifacts
+            def rows = artifacts.collect { artifact ->
+                def id = artifact.moduleVersion.id
+                def digest = MessageDigest.getInstance('SHA-256')
+                artifact.file.withInputStream { input ->
+                    byte[] buffer = new byte[65536]
+                    int count
+                    while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+                }
+                [group: id.group, name: id.name, version: id.version, type: artifact.type,
+                 filename: artifact.file.name, sha256: digest.digest().encodeHex().toString()]
+            }.sort { a, b -> "${a.group}:${a.name}:${a.version}" <=> "${b.group}:${b.name}:${b.version}" }
+            new File(reportDirectory).mkdirs()
+            new File(reportDirectory, 'dependency-inventory.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(rows)) + '\n'
+        }
+    }
+}

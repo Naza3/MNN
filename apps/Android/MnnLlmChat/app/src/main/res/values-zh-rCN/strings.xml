@@ -1,5 +1,6 @@
+<!-- Modified by MNN Chat API contributors, 2026: local-only foreground inference service. -->
 <resources>
-    <string name="app_name">MNN Chat</string>
+    <string name="app_name">MNN Chat API</string>
     <string name="title_activity_main">MainActivity</string>
     <string name="navigation_drawer_open">Open navigation drawer</string>
     <string name="navigation_drawer_close">Close navigation drawer</string>
@@ -46,7 +47,7 @@
     <string name="hide_benchmark">隐藏</string>
     <string name="replay_audio">重播</string>
 
-<!--    <string name="app_name">DrawerLayoutDemo</string>-->
+<!--    <string name="app_name">MNN Chat API</string>-->
     <string name="nav_open">Open navigation drawer</string>
     <string name="nav_close">Close navigation drawer</string>
     <string name="models">模型列表</string>
@@ -115,8 +116,8 @@
     <string name="settings_complete">强烈建议删除未完成任务重新下载，否则可能有数据不一致问题。</string>
     <string name="stop_download_tasks_when_chat">聊天时停止下载任务</string>
     <string name="stop_download_reason">开启后，聊天时下载任务会被暂停，减少聊天卡顿。</string>
-    <string name="enable_api_service">开启API网络服务</string>
-    <string name="enable_api_service_summary">启动兼容OpenAI的API服务器，供外部访问</string>
+    <string name="enable_api_service">本机 API 控制</string>
+    <string name="enable_api_service_summary">手动启动或停止 API，仅限同一手机调用</string>
     <string name="reset_api_config">重置API配置</string>
     <string name="reset_api_config_summary">将API服务器设置重置为默认值</string>
     <string name="reset_api_config_confirm_message">确定要重置API配置吗？这将恢复所有API设置为默认值。</string>

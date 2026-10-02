@@ -1,0 +1,161 @@
+name: MNN Chat local API test build
+
+on:
+  push:
+    branches: [feature/mnn-chat-local-api]
+    paths:
+      - 'apps/Android/MnnLlmChat/**'
+      - '.github/workflows/mnn-chat-local-api.yml'
+  # GitHub offers manual dispatch only after this file exists on the default
+  # branch. Initial feature-branch builds use the exact push trigger above.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mnn-chat-local-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build:
+    if: github.repository == 'Naza3/MNN' && github.ref == 'refs/heads/feature/mnn-chat-local-api'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CI_TOOLS: apps/Android/MnnLlmChat/tools/local_api_ci
+      REPORT_DIR: ${{ github.workspace }}/local-api-ci-report
+      NATIVE_JOBS: '2'
+    steps:
+      - name: Check out the exact App commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+      - name: Freeze and verify latest upstream engine at job start
+        id: preflight
+        run: python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
+      - name: Use JDK 17
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install exact Android packages using existing runner licenses
+        id: toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$sdkmanager"
+          # Never run `yes | sdkmanager --licenses`. An unaccepted license
+          # must stop this job and be reviewed separately.
+          "$sdkmanager" --install 'platforms;android-35' 'platforms;android-34' \
+            'build-tools;35.0.0' 'ndk;27.2.12479018' 'cmake;3.22.1' < /dev/null
+          for entry in platforms/android-35/android.jar platforms/android-34/android.jar \
+            build-tools/35.0.0/zipalign ndk/27.2.12479018/build/cmake/android.toolchain.cmake \
+            cmake/3.22.1/bin/cmake; do test -f "$ANDROID_SDK_ROOT/$entry"; done
+          java -version 2> "$REPORT_DIR/java-version.txt"
+          "$ANDROID_SDK_ROOT/cmake/3.22.1/bin/cmake" --version > "$REPORT_DIR/cmake-version.txt"
+          cp "$ANDROID_SDK_ROOT/ndk/27.2.12479018/source.properties" "$REPORT_DIR/ndk-version.txt"
+          printf '%s\n' "runner_os=$RUNNER_OS" "runner_arch=$RUNNER_ARCH" \
+            "image_version=${ImageVersion:-unknown}" > "$REPORT_DIR/runner.txt"
+      - name: Test audit helpers with synthetic fixtures
+        id: helpers
+        run: python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
+      - name: Verify pinned auxiliary Sherpa library
+        id: sherpa
+        run: python3 "$CI_TOOLS/prepare_prebuilt.py" --report-dir "$REPORT_DIR"
+      - name: Build current-source MNN arm64 engine
+        id: native
+        run: bash "$CI_TOOLS/build_native.sh"
+      - name: Run local API unit and Robolectric tests
+        id: api_tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest \
+            --tests 'com.alibaba.mnnllm.api.openai.*'
+      - name: Preserve focused test summary
+        if: always() && steps.native.outcome == 'success'
+        run: |
+          python3 "$CI_TOOLS/collect_reports.py" --report-dir "$REPORT_DIR"
+          cp "$REPORT_DIR/test-summary.json" "$REPORT_DIR/local-api-test-summary.json"
+      - name: Run all App unit tests (upstream regressions remain visible)
+        id: all_tests
+        if: always() && steps.native.outcome == 'success'
+        continue-on-error: true
+        run: bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest
+      - name: Lint standard release
+        id: lint
+        if: always() && steps.native.outcome == 'success'
+        continue-on-error: true
+        run: bash "$CI_TOOLS/run_gradle.sh" :app:lintStandardRelease
+      - name: Assemble unsigned standard arm64 APK and dependency inventory
+        id: assemble
+        if: always() && steps.native.outcome == 'success'
+        continue-on-error: true
+        run: |
+          bash "$CI_TOOLS/run_gradle.sh" :app:assembleStandardRelease :app:localApiDependencyInventory
+          bash "$CI_TOOLS/run_gradle.sh" --version > "$REPORT_DIR/gradle-version.txt"
+      - name: Audit the actual APK, native closure, and 16KiB alignment
+        id: audit
+        if: always() && steps.assemble.outcome == 'success'
+        continue-on-error: true
+        run: |
+          mapfile -t apks < <(find apps/Android/MnnLlmChat/app/build/outputs/apk/standard/release -maxdepth 1 -name '*-unsigned.apk' -type f)
+          test "${#apks[@]}" -eq 1
+          python3 "$CI_TOOLS/audit_apk.py" --apk "${apks[0]}" \
+            --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
+      - name: Collect small reports and available license notices
+        id: reports
+        if: always()
+        run: python3 "$CI_TOOLS/collect_reports.py" --report-dir "$REPORT_DIR"
+      - name: Record every stage outcome and enforce failures
+        id: gate
+        if: always()
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          steps = json.loads(os.environ['STEP_RESULTS'])
+          expected = ['preflight', 'toolchain', 'helpers', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'reports']
+          outcomes = {name: steps.get(name, {}).get('outcome', 'not_run') for name in expected}
+          out = pathlib.Path(os.environ['REPORT_DIR'])
+          out.mkdir(parents=True, exist_ok=True)
+          (out/'stage-outcomes.json').write_text(json.dumps(outcomes, indent=2)+'\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## MNN Chat local API test build\n\n')
+              for name, outcome in outcomes.items():
+                  f.write(f'- {name}: {outcome}\n')
+              f.write('\nUnsigned test artifact only. Real-device inference/background survival and full license closure require separate verification. No release has been published.\n')
+          failures = [name for name, outcome in outcomes.items() if outcome != 'success']
+          for filename in ['local-api-test-summary.json', 'test-summary.json']:
+              summary = out/filename
+              suites = json.loads(summary.read_text()) if summary.exists() else []
+              if sum(suite['tests'] for suite in suites) <= 0:
+                  failures.append(filename+': no tests executed')
+          if failures:
+              raise SystemExit('Failed or unexecuted stages: '+', '.join(failures))
+          PY
+      - name: Upload auditable reports (no credentials or user data)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mnn-chat-local-api-reports-${{ github.sha }}
+          path: local-api-ci-report/
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false
+      - name: Upload unsigned APK for testing only
+        if: always() && steps.gate.outcome == 'success' && steps.audit.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mnn-chat-local-api-unsigned-arm64-${{ github.sha }}
+          path: apps/Android/MnnLlmChat/app/build/outputs/apk/standard/release/*-unsigned.apk
+          if-no-files-found: error
+          retention-days: 14
+          include-hidden-files: false

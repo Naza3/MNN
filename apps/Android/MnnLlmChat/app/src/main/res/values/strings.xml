@@ -1,5 +1,6 @@
+<!-- Modified by MNN Chat API contributors, 2026: local-only foreground inference service. -->
 <resources>
-    <string name="app_name">MNN Chat</string>
+    <string name="app_name">MNN Chat API</string>
     <string name="title_activity_main">MainActivity</string>
     <string name="navigation_drawer_open">Open navigation drawer</string>
     <string name="navigation_drawer_close">Close navigation drawer</string>
@@ -47,7 +48,7 @@
     <string name="hide_benchmark">Hide</string>
     <string name="replay_audio">Replay</string>
 
-<!--    <string name="app_name">DrawerLayoutDemo</string>-->
+<!--    <string name="app_name">MNN Chat API</string>-->
     <string name="nav_open">Open navigation drawer</string>
     <string name="nav_close">Close navigation drawer</string>
     <string name="models">Models</string>
@@ -123,8 +124,8 @@
     <string name="settings_complete">it\'s recommended to remove unfinished tasks and redownload to prevent errors.</string>
     <string name="stop_download_tasks_when_chat">Stop downloads when chat</string>
     <string name="stop_download_reason">Stop downloads during chat ensures smoother chat experience</string>
-    <string name="enable_api_service">Enable API Network Service</string>
-    <string name="enable_api_service_summary">Start OpenAI-compatible API server for external access</string>
+    <string name="enable_api_service">Local API controls</string>
+    <string name="enable_api_service_summary">Start and stop the local API explicitly; loopback access only</string>
     <string name="reset_api_config">Reset API Configuration</string>
     <string name="reset_api_config_summary">Reset API server settings to default values</string>
     <string name="reset_api_config_confirm_message">Are you sure you want to reset API configuration? This will restore all API settings to default values.</string>

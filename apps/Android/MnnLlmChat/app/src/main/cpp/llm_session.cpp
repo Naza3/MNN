@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: remove prompt and completion logging.
 //
 // Created by ruoyi.sjd on 2025/4/18.
 //
@@ -69,7 +70,7 @@ struct AndroidSteppingStreamState {
             return;
         }
         std::string response_result = response_buffer.str();
-        MNN_DEBUG("%s %s", result_log_tag, response_result.c_str());
+        // Completion text is private; do not write it to logcat.
         response_string_for_debug = response_result;
         on_response_complete(response_result);
         if (on_progress) {
@@ -222,10 +223,12 @@ bool LlmSession::Load() {
     }
     current_config_ = config;
     auto config_str = config.dump();
-    MNN_DEBUG("extra_config: %s", config_str.c_str());
+
+    // Configuration/prompt text is private; never write it to logcat.
     ReportLlmSetConfigToFirebase("load", config_str);
     llm_->set_config(config_str);
-    MNN_DEBUG("dumped config: %s", llm_->dump_config().c_str());
+
+    // Configuration/prompt text is private; never write it to logcat.
     model_loaded_ = llm_->load();
     if (!model_loaded_) {
         last_load_error_ = "Module load failed for config: " + model_path_ +
@@ -296,16 +299,14 @@ const MNN::Transformer::LlmContext * LlmSession::Response(const std::string &pro
         full_prompt_text += it.second;
         prompt_string_for_debug += it.second;
     }
-    
-    MNN_DEBUG("submitNative prompt_string_for_debug count %s max_new_tokens_:%d", prompt_string_for_debug.c_str(), max_new_tokens_);
+
+    // Configuration/prompt text is private; never write it to logcat.
     
     // Check for multimodal content in the full prompt
     auto multimodal_result = processMultimodalPrompt(full_prompt_text);
     restoreAndroidSteppingStatusIfNeeded(llm_);
     if (multimodal_result.has_multimodal) {
-        MNN_DEBUG("Detected multimodal content, using multimodal API prompt %s with %zu images",
-             multimodal_result.multimodal_prompt.prompt_template.c_str(),
-             multimodal_result.multimodal_prompt.images.size());
+        MNN_DEBUG("Detected multimodal content with %zu images", multimodal_result.multimodal_prompt.images.size());
         if (!multimodal_result.error_message.empty()) {
             MNN_ERROR("Multimodal processing errors: %s", multimodal_result.error_message.c_str());
         }
@@ -419,7 +420,8 @@ void LlmSession::SetAssistantPrompt(const std::string& assistant_prompt) {
         ReportLlmSetConfigToFirebase("set_assistant_prompt", config_str);
         llm_->set_config(config_str);
     }
-    MNN_DEBUG("dumped config: %s", llm_->dump_config().c_str());
+
+    // Configuration/prompt text is private; never write it to logcat.
 }
 
 void LlmSession::updateConfig(const std::string& config_json) {
@@ -436,9 +438,11 @@ void LlmSession::updateConfig(const std::string& config_json) {
         auto config_str = current_config_.dump();
         ReportLlmSetConfigToFirebase("update_config", config_str);
         llm_->set_config(config_str);
-        MNN_DEBUG("Updated config applied: %s", current_config_.dump().c_str());
+
+    // Configuration/prompt text is private; never write it to logcat.
     } else {
-        MNN_DEBUG("LLM not initialized yet, config saved for later: %s", current_config_.dump().c_str());
+
+    // Configuration/prompt text is private; never write it to logcat.
     }
 }
 
@@ -501,7 +505,7 @@ const MNN::Transformer::LlmContext * LlmSession::ResponseWithHistory(
         full_prompt_text += it.second;
     }
     
-    MNN_DEBUG("submitNative prompt_string_for_debug:\n%s\nmax_new_tokens_:%d", prompt_string_for_debug.c_str(), max_new_tokens_);
+    // Prompt text is private; do not write it to logcat.
     
     // Check for multimodal content in the full prompt
     auto multimodal_result = processMultimodalPrompt(full_prompt_text);

@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: local-only foreground inference service.
 package com.alibaba.mnnllm.api.openai.runtime
 
 import com.alibaba.mnnllm.android.chat.model.ChatDataItem
@@ -7,7 +8,8 @@ data class EnsureSessionResult(
     val success: Boolean,
     val session: LlmSession? = null,
     val modelId: String? = null,
-    val reason: String? = null
+    val reason: String? = null,
+    val chatLeaseEpoch: Long? = null
 )
 
 interface LlmRuntimeController {
@@ -24,5 +26,7 @@ interface LlmRuntimeController {
     fun getActiveModelId(): String?
     fun getThinkingEnabled(): Boolean?
     fun setThinkingEnabled(enabled: Boolean): Boolean
-    fun releaseSession()
+    fun releaseSession(expected: LlmSession? = null, chatLeaseEpoch: Long? = null)
+    fun ensureApiSession(modelId: String, apiEpoch: Long): EnsureSessionResult =
+        EnsureSessionResult(false, reason = "API_RUNTIME_UNAVAILABLE")
 }

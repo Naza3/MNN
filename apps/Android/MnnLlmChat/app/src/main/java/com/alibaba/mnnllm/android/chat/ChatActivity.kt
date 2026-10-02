@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: Activity lifetime is independent of local API.
 // Created by ruoyi.sjd on 2024/12/25.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 package com.alibaba.mnnllm.android.chat
@@ -110,6 +111,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (redirectToLocalApi()) return
         binding = ActivityChatBinding.inflate(layoutInflater)
         setContentView(binding.root)
         val toolbar = binding.toolbar
@@ -139,6 +141,18 @@ class ChatActivity : AppCompatActivity() {
         }
         this.setupSession()
         initializeVoiceModelsChecker()
+    }
+
+    private fun redirectToLocalApi(): Boolean {
+        if (!com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) return false
+        startActivity(android.content.Intent(this, com.alibaba.mnnllm.api.openai.ui.LocalApiActivity::class.java))
+        finish()
+        return true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!isFinishing) redirectToLocalApi()
     }
 
     private fun setupView(modelId:String, modelName: String) {
@@ -208,7 +222,10 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun setupSession() {
-        chatSession = chatPresenter.createSession()
+        try { chatSession = chatPresenter.createSession() } catch (e: IllegalStateException) {
+            if (!redirectToLocalApi()) onModelLoadFailed(e.message ?: "Runtime is busy")
+            return
+        }
         sessionId = chatSession!!.sessionId
         CrashReportContext.setCurrentModel(modelId, sessionId)
         onSessionCreated()
@@ -471,6 +488,10 @@ class ChatActivity : AppCompatActivity() {
     }
 
     fun onLoadingChanged(loading: Boolean) {
+        if (com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) {
+            if (!isFinishing) redirectToLocalApi()
+            return
+        }
         isLoading = loading
         this.chatInputModule!!.onLoadingStatesChanged(loading)
         layoutModelLoading!!.visibility =
@@ -483,10 +504,7 @@ class ChatActivity : AppCompatActivity() {
             if (chatSession!!.supportOmni) {
                 setupOmni()
             }
-            // Check API service settings and start service
-            if (isApiServiceEnabled(this)) {
-                ApiServiceManager.startApiService(this, modelId)
-            }
+            // API startup is an explicit user action in LocalApiActivity, never replayed from settings.
         }
     }
 
@@ -658,9 +676,7 @@ class ChatActivity : AppCompatActivity() {
         if (::chatPresenter.isInitialized) {
             chatPresenter.destroy()
         }
-        MainScope().launch {
-            ApiServiceManager.stopApiService(ApplicationProvider.get())
-        }
+        // A started foreground API service outlives this Activity.
     }
 
     private fun saveInterruptedResponseIfNeeded() {
@@ -685,7 +701,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
-        AudioPlayService.instance!!.destroy()
+        AudioPlayService.instance?.destroy()
     }
     fun onGenerateStart(userData: ChatDataItem) {
         chatListComponent.onStartSendMessage(userData)

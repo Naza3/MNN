@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 MNN Chat API contributors. Licensed under Apache-2.0. -->
+<resources>
+    <string name="local_api_title">本机 API</string>
+    <string name="local_api_description">为本机应用提供纯文本推理。API 运行期间暂停聊天与基准测试。Android 可能终止进程，届时需手动重新启动。</string>
+    <string name="local_api_select_model">请先打开已下载的文本模型，再选择 API 设置</string>
+    <string name="local_api_model_url">模型：%1$s\n\n接口地址：http://127.0.0.1:%2$d/v1\n</string>
+    <string name="local_api_port_hint">端口（1024–65535）</string>
+    <string name="local_api_save_port">保存端口</string>
+    <string name="local_api_stop_change_port">请先停止 API，再修改端口</string>
+    <string name="local_api_port_saved">端口已保存</string>
+    <string name="local_api_invalid_port">请输入 1024–65535 之间的端口</string>
+    <string name="local_api_copy_key">复制 API 密钥</string>
+    <string name="local_api_key_copied">密钥已复制，请仅提供给可信任的应用</string>
+    <string name="local_api_regenerate_key">重新生成 API 密钥</string>
+    <string name="local_api_stop_rotate">请停止 API 并等待清理完成，再更换密钥并重启服务</string>
+    <string name="local_api_replace_key_message">要更换密钥吗？重启 API 后，原有客户端必须使用新密钥。</string>
+    <string name="local_api_replace">更换</string>
+    <string name="local_api_key_replaced">密钥已更换</string>
+    <string name="local_api_start">启动本机 API</string>
+    <string name="local_api_start_failed">无法启动本机 API</string>
+    <string name="local_api_stop">停止本机 API</string>
+    <string name="local_api_back">返回</string>
+    <string name="local_api_status">状态：%1$s\n</string>
+    <string name="local_api_state_chat">已停止</string>
+    <string name="local_api_state_starting">启动中</string>
+    <string name="local_api_state_ready">可用</string>
+    <string name="local_api_state_stopping">停止中</string>
+    <string name="local_api_state_failed">清理失败</string>
+    <string name="local_api_notification_channel">本机推理 API</string>
+    <string name="local_api_notification_starting">正在启动本机 API</string>
+    <string name="local_api_wait_load">正在等待前一任务结束并加载模型</string>
+    <string name="local_api_ready">本机 API 已可用</string>
+    <string name="local_api_notification_ready">http://127.0.0.1:%1$d/v1 · 最多一项推理、一项排队</string>
+    <string name="local_api_stopping">正在停止本机 API</string>
+    <string name="local_api_wait_native">正在等待原生推理安全结束，请稍候</string>
+    <string name="local_api_cleanup_failed">本机 API 清理失败</string>
+    <string name="local_api_restart_app">请重新启动应用后再加载其他模型</string>
+</resources>

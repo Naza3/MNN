@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: local-only foreground inference service.
 // Created by ruoyi.sjd on 2025/2/28.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 
@@ -85,9 +86,12 @@ class MainSettingsFragment : Fragment() {
         setupVoiceModelManagement()
         setupStorageManagement()
 
-        binding.itemEnableApi.isChecked = MainSettings.isApiServiceEnabled(requireContext())
-        binding.itemEnableApi.setOnCheckedChangeListener { isChecked ->
-            sharedPreferences.edit().putBoolean("enable_api_service", isChecked).apply()
+        binding.itemEnableApi.isChecked = false
+        binding.itemEnableApi.setOnCheckedChangeListener { checked ->
+            if (checked) {
+                binding.itemEnableApi.isChecked = false
+                startActivity(Intent(requireContext(), com.alibaba.mnnllm.api.openai.ui.LocalApiActivity::class.java))
+            }
         }
 
         setupCrashDiagnostics()
@@ -157,27 +161,11 @@ class MainSettingsFragment : Fragment() {
                 .setTitle(R.string.reset_api_config)
                 .setMessage(R.string.reset_api_config_confirm_message)
                 .setPositiveButton(android.R.string.ok) { _, _ ->
-                    ApiServerConfig.resetToDefault(requireContext())
-                    if (MainSettings.isApiServiceEnabled(requireContext()) && ApiServiceManager.isApiServiceRunning()) {
-                        // Run stop/start off main thread to avoid ANR
-                        lifecycleScope.launch {
-                            withContext(Dispatchers.IO) {
-                                ApiServiceManager.stopApiService(requireContext())
-                                delay(500)
-                                ApiServiceManager.startApiService(requireContext())
-                            }
-                            Toast.makeText(
-                                requireContext(),
-                                getString(R.string.api_config_reset_service_restarted),
-                                Toast.LENGTH_LONG
-                            ).show()
-                        }
+                    if (com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) {
+                        Toast.makeText(requireContext(), "Stop the local API before resetting settings", Toast.LENGTH_LONG).show()
                     } else {
-                        Toast.makeText(
-                            requireContext(),
-                            getString(R.string.api_config_reset_to_default),
-                            Toast.LENGTH_LONG
-                        ).show()
+                        ApiServerConfig.resetToDefault(requireContext())
+                        Toast.makeText(requireContext(), "API configuration reset", Toast.LENGTH_LONG).show()
                     }
                 }
                 .setNegativeButton(android.R.string.cancel, null)

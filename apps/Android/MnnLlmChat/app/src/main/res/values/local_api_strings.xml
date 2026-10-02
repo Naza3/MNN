@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 MNN Chat API contributors. Licensed under Apache-2.0. -->
+<resources>
+    <string name="local_api_title">Local API</string>
+    <string name="local_api_description">Text-only inference for apps on this phone. Chat and benchmark are paused while the API is running. Android may stop the process; restart manually if needed.</string>
+    <string name="local_api_select_model">Open a downloaded text model in Chat, then choose API settings</string>
+    <string name="local_api_model_url">Model: %1$s\n\nBase URL: http://127.0.0.1:%2$d/v1\n</string>
+    <string name="local_api_port_hint">Port (1024–65535)</string>
+    <string name="local_api_save_port">Save port</string>
+    <string name="local_api_stop_change_port">Stop the API before changing its port</string>
+    <string name="local_api_port_saved">Port saved</string>
+    <string name="local_api_invalid_port">Enter a port between 1024 and 65535</string>
+    <string name="local_api_copy_key">Copy API key</string>
+    <string name="local_api_key_copied">Key copied. Give it only to apps you trust</string>
+    <string name="local_api_regenerate_key">Generate new API key</string>
+    <string name="local_api_stop_rotate">Stop the API and wait for cleanup, then replace the key and restart</string>
+    <string name="local_api_replace_key_message">Replace the key? Existing clients must use the new key when you restart the API.</string>
+    <string name="local_api_replace">Replace</string>
+    <string name="local_api_key_replaced">Key replaced</string>
+    <string name="local_api_start">Start local API</string>
+    <string name="local_api_start_failed">Could not start the local API</string>
+    <string name="local_api_stop">Stop local API</string>
+    <string name="local_api_back">Back</string>
+    <string name="local_api_status">Status: %1$s\n</string>
+    <string name="local_api_state_chat">Stopped</string>
+    <string name="local_api_state_starting">Starting</string>
+    <string name="local_api_state_ready">Ready</string>
+    <string name="local_api_state_stopping">Stopping</string>
+    <string name="local_api_state_failed">Cleanup failed</string>
+    <string name="local_api_notification_channel">Local inference API</string>
+    <string name="local_api_notification_starting">Starting local API</string>
+    <string name="local_api_wait_load">Waiting for the previous task and loading the model</string>
+    <string name="local_api_ready">Local API ready</string>
+    <string name="local_api_notification_ready">http://127.0.0.1:%1$d/v1 • one active request, one waiting</string>
+    <string name="local_api_stopping">Stopping local API</string>
+    <string name="local_api_wait_native">Waiting for native work to finish safely</string>
+    <string name="local_api_cleanup_failed">Local API cleanup failed</string>
+    <string name="local_api_restart_app">Restart the app before loading another model</string>
+</resources>

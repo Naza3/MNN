@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: shared exclusive native-runtime lease.
 package com.alibaba.mnnllm.android.llm
 
 import android.util.Log
@@ -14,17 +15,25 @@ class SanaSession(
     private val configPath: String,
     private var savedHistory: List<ChatDataItem>? = null
 ) : ChatSession {
-    
+
     override var supportOmni: Boolean = false
     override val debugInfo: String = ""
-    
+
     private var nativePtr: Long = 0
+    private var releaseFailed = false
+    private val ownerGate = com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate
+    private lateinit var ownerLease: com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnerGate.Lease
+    init { synchronized(ownerGate) { ownerLease = ownerGate.acquireChat { release() } } }
     @Volatile
     private var releaseRequested = false
     @Volatile
     private var generating = false
 
+    @Synchronized
     override fun load() {
+        ownerGate.checkAccess(ownerLease)
+        if (nativePtr != 0L) return
+        try {
         Log.d(TAG, "SanaSession load() called, configPath: $configPath")
         val config = try {
             ModelConfig.loadConfig(modelId)
@@ -43,9 +52,14 @@ class SanaSession(
             configPath,
             Gson().toJson(configMap)
         )
+        check(nativePtr != 0L) { "Native model initialization failed" }
         Log.d(TAG, "SanaSession load() nativePtr initialized: $nativePtr")
         if (releaseRequested) {
             release()
+        }
+        } catch (error: Throwable) {
+            try { release() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
+            throw error
         }
     }
 
@@ -55,7 +69,7 @@ class SanaSession(
         progressListener: GenerateProgressListener
     ): HashMap<String, Any> {
         synchronized(this) {
-            Log.d(TAG, "Sana generate prompt: $prompt, nativePtr: $nativePtr")
+            ownerGate.checkAccess(ownerLease)
             if (nativePtr == 0L) {
                 Log.e(TAG, "nativePtr is 0, cannot generate")
                 return HashMap<String, Any>().apply {
@@ -79,7 +93,9 @@ class SanaSession(
                 seed,
                 useCfg,
                 cfgScale,
-                progressListener
+                object : GenerateProgressListener {
+                    override fun onProgress(progress: String?): Boolean = ownerLease.cancelled.get() || progressListener.onProgress(progress)
+                }
             ) ?: HashMap<String, Any>().apply {
                 put("error", true)
                 put("message", "Native generation returned null")
@@ -98,23 +114,23 @@ class SanaSession(
         }
     }
 
+    @Synchronized
     override fun reset(): String {
+        ownerGate.checkAccess(ownerLease)
         return System.currentTimeMillis().toString().also { sessionId = it }
     }
 
+    @Synchronized
     override fun release() {
-        synchronized(this) {
-            if (!generating) {
-                releaseInner()
-            } else {
-                releaseRequested = true
-            }
-        }
+        ownerLease.cancelled.set(true)
+        releaseInner()
+        ownerGate.released(ownerLease)
     }
-    
+
     private fun releaseInner() {
         if (nativePtr != 0L) {
-            releaseNative(nativePtr)
+            check(!releaseFailed) { "Previous native cleanup was not confirmed" }
+            try { releaseNative(nativePtr) } catch (error: Throwable) { releaseFailed = true; throw error }
             nativePtr = 0
             provide().removeSession(sessionId)
         }

@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: local-only foreground inference service.
 package com.alibaba.mnnllm.api.openai.network.logging
 
 import OpenAIChatRequest
@@ -19,21 +20,21 @@ class ChatLogger {
     /** * recordrequeststart*/
     fun logRequestStart(traceId: String, call: ApplicationCall) {
         Timber.tag(TAG_REQUEST).d("[$traceId] 进入接口")
-        Timber.tag(TAG_REQUEST).d("请求头: ${call.request.headers.flattenEntries().joinToString("; ")}")
+        // Private request data is never logged.
         Timber.tag(TAG_REQUEST).i("收到请求: ${call.request.httpMethod.value} ${call.request.path()}")
     }
 
     /** * recordrequestbody*/
     fun logRequestBody(traceId: String, chatRequest: OpenAIChatRequest, rawBody: String? = null) {
         if (rawBody != null) {
-            Timber.tag(TAG_REQUEST).d("原始请求体: $rawBody")
+        // Private request data is never logged.
         }
-        Timber.tag(TAG_REQUEST).d("[$traceId] 请求体: $chatRequest")
+        // Private request data is never logged.
     }
 
     /** * recordconvertafterhistorymessage*/
     fun logTransformedHistory(traceId: String, unifiedHistory: List<android.util.Pair<String, String>>) {
-        Timber.tag(TAG_TRANSFORM).d("[$traceId] 转换后的统一历史消息: $unifiedHistory")
+        // Private request data is never logged.
     }
 
     /** * recordinferencestart*/
@@ -48,7 +49,7 @@ class ChatLogger {
 
     /** * recordstreamingresponse*/
     fun logStreamDelta(traceId: String, progress: String) {
-        Timber.tag(TAG_STREAM).d("[$traceId] 发送delta: $progress")
+        // Private request data is never logged.
     }
 
     /** * recordstreamingresponseend*/

@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: debug cleanup retains its own attachment epoch.
 package com.alibaba.mnnllm.api.openai.debug
 
 import android.util.Pair
@@ -86,9 +87,13 @@ internal interface LlmDebugController {
 
 internal object DefaultLlmDebugController : LlmDebugController {
     private val runtime get() = ServiceLocator.getLlmRuntimeController()
+    private var ownedAttachment: EnsureSessionResult? = null
 
+    @Synchronized
     override fun ensureSession(modelId: String, forceReload: Boolean, useAppConfig: Boolean): EnsureSessionResult {
-        return runtime.ensureSession(modelId, forceReload, useAppConfig)
+        return runtime.ensureSession(modelId, forceReload, useAppConfig).also {
+            if (it.success) ownedAttachment = it
+        }
     }
 
     override fun getModelId(): String? = runtime.getActiveModelId()
@@ -101,10 +106,14 @@ internal object DefaultLlmDebugController : LlmDebugController {
 
     override fun hasSession(): Boolean = runtime.getActiveSession() != null
 
+    @Synchronized
     override fun releaseSession() {
-        runtime.releaseSession()
+        val attachment = ownedAttachment ?: return
+        ownedAttachment = null
+        runtime.releaseSession(attachment.session, attachment.chatLeaseEpoch)
     }
 
+    @Synchronized
     override fun runPrompt(modelId: String, prompt: String, forceReload: Boolean, useAppConfig: Boolean): LlmRunResult {
         return if (useAppConfig) {
             runIsolatedAppConfigPrompt(modelId, prompt, forceReload)
@@ -114,20 +123,12 @@ internal object DefaultLlmDebugController : LlmDebugController {
     }
 
     private fun runIsolatedAppConfigPrompt(modelId: String, prompt: String, forceReload: Boolean): LlmRunResult {
-        val restoreModelId = runtime.getActiveModelId()
-        val shouldRestoreBaseSession = !restoreModelId.isNullOrBlank() && runtime.getActiveSession() != null
-
         return try {
             runPromptWithRuntimeSession(modelId, prompt, forceReload = true, useAppConfig = true)
         } finally {
-            runtime.releaseSession()
-            if (shouldRestoreBaseSession) {
-                runtime.ensureSession(
-                    modelId = restoreModelId!!,
-                    forceReload = true,
-                    useAppConfig = false
-                )
-            }
+            // Never restore a model from delayed cleanup: a newer UI may already own the runtime.
+            // The next explicit debug ensure/run command can acquire a fresh attachment.
+            releaseSession()
         }
     }
 
@@ -138,8 +139,8 @@ internal object DefaultLlmDebugController : LlmDebugController {
         useAppConfig: Boolean
     ): LlmRunResult {
         val startedAt = System.currentTimeMillis()
-        val ensureResult = runtime.ensureSession(modelId, forceReload, useAppConfig)
-        val session = ensureResult.session ?: runtime.getActiveSession()
+        val ensureResult = ensureSession(modelId, forceReload, useAppConfig)
+        val session = ensureResult.session
         if (!ensureResult.success || session == null) {
             return LlmRunResult(
                 success = false,
@@ -418,8 +419,9 @@ internal class LlmDumperPlugin(
     private fun handleRelease(writer: PrintStream) {
         controller.releaseSession()
         writer.println("RESULT=OK")
-        writer.println("SESSION_PRESENT=false")
-        writer.println("SESSION_SOURCE=none")
+        val present = controller.hasSession()
+        writer.println("SESSION_PRESENT=$present")
+        writer.println("SESSION_SOURCE=${if (present) "runtime" else "none"}")
     }
 
     private fun handleMockLatex(writer: PrintStream, args: List<String>) {

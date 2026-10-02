@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: local-only foreground inference service.
 package com.alibaba.mnnllm.android.benchmark
 
 import android.content.Context
@@ -102,6 +103,8 @@ class BenchmarkService {
                 } catch (e: IllegalStateException) {
                     CrashReportContext.setBenchmarkState("initialize_model_load_exception")
                     Log.e(TAG, "Model load failed with exception: ${e.message}")
+                    // load() releases its failed lease. Keep this explicit cleanup for future session implementations.
+                    session.release()
                     llmSession = null
                     false
                 }
