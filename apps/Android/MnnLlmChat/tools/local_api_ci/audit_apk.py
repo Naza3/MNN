@@ -11,6 +11,9 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 
+from pem_scan import private_key_markers, credential_like_token
+from public_fixture import validate_fixture_proof
+
 HERE = Path(__file__).resolve().parent
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 SYSTEM_LIBS = {"libandroid.so", "liblog.so", "libm.so", "libdl.so", "libc.so", "libz.so",
@@ -101,7 +104,7 @@ def validate_manifest(xml, expected):
     return report, errors
 
 
-def suspicious_entry(name, data):
+def suspicious_entry(name, data, trusted_fixture_sha=None):
     path = PurePosixPath(name)
     if path.suffix.lower() in MODEL_SUFFIXES or "builtin_models/" in name:
         return "model asset"
@@ -112,9 +115,9 @@ def suspicious_entry(name, data):
     if name.startswith("assets/") and path.suffix.lower() == ".bin" and len(data) > 262144:
         return "large binary model candidate"
     # Only expose a filename/reason, never a credential's matched bytes.
-    if re.search(rb"-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----", data):
+    if any(not item["accepted"] for item in private_key_markers(data, trusted_fixture_sha)):
         return "private key material"
-    if re.search(rb"\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,})\b", data):
+    if credential_like_token(data):
         return "credential-like token"
     return None
 
@@ -266,6 +269,7 @@ def main():
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--sdk", type=Path, required=True)
     parser.add_argument("--report-dir", type=Path, required=True)
+    parser.add_argument("--gradle-home", type=Path, default=Path.home() / ".gradle")
     args = parser.parse_args()
     lock = json.loads((HERE / "build-lock.json").read_text())
     expected, tc = lock["expected_apk"], lock["toolchain"]
@@ -295,6 +299,11 @@ def main():
         report["signing"] = "unsigned" if signature.returncode else "signed"
         if not signature.returncode:
             errors.append("CI release APK must be unsigned; signing belongs to the user's controlled environment")
+        proof = json.loads((args.report_dir / "public-test-fixture-provenance.json").read_text())
+        validate_fixture_proof(proof, lock["public_test_fixture"], args.gradle_home)
+        report["public_test_fixture"] = proof
+        trusted_fixture_sha = lock["public_test_fixture"]["constant_sha256"]
+        report["private_key_marker_classifications"] = []
         with zipfile.ZipFile(args.apk) as archive, tempfile.TemporaryDirectory(prefix="mnn-apk-audit-") as temp:
             libs = {PurePosixPath(n).name for n in archive.namelist() if n.startswith("lib/arm64-v8a/") and n.endswith(".so")}
             for required in expected["native_libraries"]:
@@ -305,7 +314,10 @@ def main():
                 if entry.is_dir():
                     continue
                 data = archive.read(entry)
-                reason = suspicious_entry(entry.filename, data)
+                markers = private_key_markers(data, trusted_fixture_sha)
+                if markers:
+                    report["private_key_marker_classifications"].append({"entry": entry.filename, "markers": markers})
+                reason = suspicious_entry(entry.filename, data, trusted_fixture_sha)
                 if reason:
                     errors.append(f"Prohibited APK entry ({reason}): {entry.filename}")
                 if not (entry.filename.startswith("lib/") and entry.filename.endswith(".so")):

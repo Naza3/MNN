@@ -140,5 +140,16 @@
     ],
     "version_code": "831",
     "version_name": "0.8.3-localapi.1"
+  },
+  "public_test_fixture": {
+    "coordinate": "io.netty:netty-handler:4.1.119.Final",
+    "binary_url": "https://repo.maven.apache.org/maven2/io/netty/netty-handler/4.1.119.Final/netty-handler-4.1.119.Final.jar",
+    "binary_sha256": "9b49be98e36bb79a2025ffb5159aec87da2720cfa545f56de39c3bc108587b1b",
+    "source_url": "https://repo.maven.apache.org/maven2/io/netty/netty-handler/4.1.119.Final/netty-handler-4.1.119.Final-sources.jar",
+    "source_sha256": "38ba7ef33e099c5a84e8051448227199d381a4134ccf6955fd7da9f8f6237f6f",
+    "constant_sha256": "67153216753676a99069a64f0986ef7015efed5eca8d545261c6c1aa9e9117c8",
+    "constant_size": 1699,
+    "source_symbol": "io.netty.handler.ssl.SslUtils.PROBING_KEY",
+    "purpose": "Public TLS provider capability checks in OpenSsl and JdkSslServerContext; never a production credential"
   }
 }

@@ -78,7 +78,7 @@ artifact. New dependencies should use fixed versions and audited origins.
 
 The workflow uses runner SDK licenses already present and does not pipe `yes`
 to accept new terms. Missing license acceptance stops provisioning and needs
-separate review. Do not place service configuration, credentials, keys, model
+separate review. Do not place user service configuration, credentials, production keys, model
 weights, or private conversations in this checkout or public CI artifacts.
 
 ## Local commands
@@ -96,6 +96,7 @@ export REPORT_DIR="$PWD/local-api-ci-report"
 CI_TOOLS=apps/Android/MnnLlmChat/tools/local_api_ci
 python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
 python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
+python3 "$CI_TOOLS/verify_pem_scanner.py" --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
 bash "$CI_TOOLS/build_native.sh"
 bash "$CI_TOOLS/build_sherpa.sh"
 bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest --tests 'com.alibaba.mnnllm.api.openai.*'
@@ -123,6 +124,21 @@ Firebase code was removed. Signing environment variables are explicitly
 rejected. The scripts do not upload anything when run locally.
 
 ## Evidence and failure interpretation
+
+Before native compilation, `verify_pem_scanner.py` verifies the exact locked
+Netty binary/source archives and compiles real D8 fixtures. Netty's public
+`SslUtils.PROBING_KEY` is a TLS provider capability-test constant, not a user
+credential. Only that exact complete DEX string, with verified source/binary
+provenance, is classified as public test data. Bare header format strings must
+also occupy an entire DEX string identified with bounds-checked string-table
+parsing. This is not a full DEX verifier. Every other complete, modified, mixed,
+or malformed key-looking payload fails. No class, DEX, or library is exempted.
+The tests reject synthetic PKCS8/RSA/EC/CRLF/encrypted-form payloads, mutations,
+mixed known/unknown keys, and a token beside the known fixture. Token scanning
+also respects DEX string boundaries instead of trusting adjacent length bytes.
+`public-test-fixture-provenance.json` and `pem-scanner-regression.json` preserve
+only hashes, provenance, classifications, and offsets; no PEM bodies are logged.
+The audit separately verifies the actual Gradle runtime Netty JAR hash.
 
 Before native compilation, `verify_apk_metadata.py` builds tiny resource-only
 APKs with the locked SDK aapt2. It verifies numeric foreground-service flags,
@@ -161,7 +177,9 @@ backup (every compiled XML variant followed from the manifest resource ID),
 ARM64-only libraries, required JNI libraries, every ELF PT_LOAD page
 alignment, ZIP alignment, native dynamic-dependency closure, and obvious
 model/key/config material. The scanner is a defense-in-depth check, not a proof
-that arbitrary secrets can never exist in binaries. CI only uses synthetic
+that arbitrary secrets can never exist in binaries (including split, encoded,
+or deliberately obfuscated content). Exact public upstream test data is
+identified separately as described above, never presented as a production key. CI only uses synthetic
 fixture credentials. Test stdout and private model/chat data are not collected.
 
 Artifacts are retained for 14 days. Diagnostic reports upload even on failure;

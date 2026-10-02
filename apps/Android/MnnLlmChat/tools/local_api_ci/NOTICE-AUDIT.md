@@ -56,6 +56,25 @@ the companion bundle preserves notices it can find. Include applicable notices
 with any redistribution, and review transitive/embedded requirements rather
 than treating a POM as complete clearance.
 
+### Netty public TLS capability-test data
+
+Netty `io.netty:netty-handler:4.1.119.Final` contains a public, fixed
+`SslUtils.PROBING_KEY`, also inlined into `OpenSsl` and `JdkSslServerContext`.
+The reviewed same-version source uses it for certificate-callback and wrapping
+trust-manager capability probes. App server credentials are separate inputs.
+The key is already public test data and must never be used as a production
+credential. Its exact 1699-byte constant SHA-256 is
+`67153216753676a99069a64f0986ef7015efed5eca8d545261c6c1aa9e9117c8`.
+
+`build-lock.json` pins the official Maven binary and source URLs/hashes.
+`public-test-fixture-provenance.json` records verification of both archives and
+three binary constant pools; the APK audit additionally cross-checks the actual
+Gradle runtime binary. The scanner allows only that exact complete DEX string
+and reports it as `public_upstream_tls_capability_test_fixture`. It does not
+exempt other keys, other strings in the same DEX, the library, or changed bytes.
+No key body is copied into diagnostic reports. This scoped classification does
+not alter Netty's license/NOTICE requirements or establish legal clearance.
+
 Header-only libraries can carry additional notices in source headers. The
 collector includes available relevant header evidence; it does not claim a
 comprehensive legal assessment of all native/JVM code. Firebase plugins and
