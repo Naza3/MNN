@@ -225,19 +225,27 @@ class ChatActivity : AppCompatActivity() {
 
     private fun setupSession() {
         onLoadingChanged(true)
+        val hosting = com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.beginLoading(modelId!!, modelName)
+        requestBackgroundNotificationPermission()
+        try { com.alibaba.mnnllm.android.chat.background.ChatGenerationService.startHosting(this, hosting.token) }
+        catch (_: Exception) { showBackgroundStartFailure() }
         lifecycleScope.launch {
             try {
-                val session = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { chatPresenter.createSession() }
+                val session = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    try { chatPresenter.createSession() }
+                    finally { com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.finishLoading(hosting.token) }
+                }
                 if (!chatPresenter.isCurrentAttachment() || isFinishing) return@launch
                 chatSession = session
                 sessionId = session.sessionId
                 CrashReportContext.setCurrentModel(modelId, sessionId)
                 onSessionCreated()
+                chatPresenter.restoreBackgroundResponse()
                 chatPresenter.load()
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (e: Exception) {
                 if (!isFinishing && !redirectToLocalApi()) onModelLoadFailed(e.message ?: "Runtime is busy")
-            }
+            } finally { com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.finishLoading(hosting.token) }
         }
     }
 
@@ -614,10 +622,10 @@ class ChatActivity : AppCompatActivity() {
             benchmarkModule.start(waitForLastCompleted = {
                 waitForGeneratingFinished()
             }, handleSendMessage = { message ->
-                chatPresenter.prepareBenchmarkMessage(benchmarkSession, benchmarkEpoch)
+                sessionId = chatPresenter.prepareBenchmarkMessage(benchmarkSession, benchmarkEpoch)
                 check(com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController()
                     .isChatAttachmentCurrent(benchmarkSession, benchmarkEpoch)) { "Benchmark chat was replaced" }
-                return@start handleSendMessage(createUserMessage(message))
+                return@start chatPresenter.requestGenerate(createUserMessage(message), allowBackground = false)
             })
         } else if (item.itemId == R.id.menu_item_api_settings) {
             ApiSettingsBottomSheetFragment().show(supportFragmentManager, "ApiSettingsBottomSheetFragment")
@@ -682,6 +690,10 @@ class ChatActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 8331 && !com.alibaba.mnnllm.android.chat.background.ChatGenerationService.notificationsVisible(this)) {
+            getSharedPreferences("chat_background_notifications", MODE_PRIVATE).edit().putBoolean("hint_shown", true).apply()
+            Toast.makeText(this, R.string.chat_background_notification_hint, Toast.LENGTH_LONG).show()
+        }
         // Forward permission results to the attachment picker module
         this.chatInputModule?.let { inputModule ->
             if (inputModule is ChatInputComponent) {
@@ -722,6 +734,7 @@ class ChatActivity : AppCompatActivity() {
         if (!::chatPresenter.isInitialized || !::chatListComponent.isInitialized) {
             return
         }
+        if (chatPresenter.ownsBackgroundResponse()) return
         val recentItem = chatListComponent.recentItem ?: return
         if (!ChatHistoryPersistencePolicy.shouldSaveInterruptedAssistant(
                 isGenerating = isGenerating,
@@ -742,6 +755,40 @@ class ChatActivity : AppCompatActivity() {
         super.onStop()
         AudioPlayService.instance?.destroy()
     }
+    fun requestBackgroundNotificationPermission() {
+        com.alibaba.mnnllm.android.chat.background.ChatGenerationService.ensureChannel(this)
+        val preferences = getSharedPreferences("chat_background_notifications", MODE_PRIVATE)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED && !preferences.getBoolean("requested", false)) {
+            preferences.edit().putBoolean("requested", true).apply()
+            androidx.core.app.ActivityCompat.requestPermissions(this, arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 8331)
+        } else if (!com.alibaba.mnnllm.android.chat.background.ChatGenerationService.notificationsVisible(this) &&
+            !preferences.getBoolean("hint_shown", false)) {
+            preferences.edit().putBoolean("hint_shown", true).apply()
+            Toast.makeText(this, R.string.chat_background_notification_hint, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    fun showBackgroundStartFailure() = Toast.makeText(this, R.string.chat_background_start_failed, Toast.LENGTH_LONG).show()
+
+    fun showBackgroundGenerationFailure(message: String?) {
+        Toast.makeText(this, message ?: getString(R.string.chat_background_failed), Toast.LENGTH_LONG).show()
+    }
+
+    fun renderBackgroundGeneration(snapshot: com.alibaba.mnnllm.android.chat.background.ChatGenerationCoordinator.Snapshot) {
+        val recent = chatListComponent.recentItem ?: return
+        val value = com.alibaba.mnnllm.android.chat.background.BackgroundChatGeneration.assistantItem(snapshot, recent.time)
+        recent.text = value.text
+        recent.displayText = value.displayText
+        recent.thinkingText = value.thinkingText
+        recent.thinkingFinishedTime = value.thinkingFinishedTime
+        recent.loading = snapshot.phase.active
+        recent.benchmarkInfo = value.benchmarkInfo
+        chatListComponent.updateAssistantResponse(recent)
+        setIsGenerating(snapshot.phase.active)
+    }
+
     fun onGenerateStart(userData: ChatDataItem) {
         chatListComponent.onStartSendMessage(userData)
         setIsGenerating(true)
@@ -885,6 +932,8 @@ class ChatActivity : AppCompatActivity() {
             // Trigger the same stop logic as the UI stop button
             chatPresenter.stopGenerate()
             
+            // Service generation remains stopping until the native call and persistence finish.
+            if (chatPresenter.ownsBackgroundResponse()) return
             // Update UI state immediately
             setIsGenerating(false)
             val recentItem = chatListComponent.recentItem

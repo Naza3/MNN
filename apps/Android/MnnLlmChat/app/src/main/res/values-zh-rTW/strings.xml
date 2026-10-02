@@ -672,4 +672,14 @@
     <string name="download_state_preparing">準備中</string>
     <string name="open_in_browser">在瀏覽器中開啟</string>
     <string name="menu_show_model_info_title">模型資訊</string>
+    <string name="chat_background_channel">模型状态</string>
+    <string name="chat_background_channel_description">聊天和本机 API 的模型加载、生成状态及停止按钮</string>
+    <string name="chat_background_generating">正在生成回复</string>
+    <string name="chat_background_stopping">正在停止，等待推理安全返回…</string>
+    <string name="chat_background_completed">回复已保存</string>
+    <string name="chat_background_stopped">生成已停止</string>
+    <string name="chat_background_failed">聊天生成失败</string>
+    <string name="chat_background_stop">停止生成</string>
+    <string name="chat_background_notification_hint">通知未开启：文本仍可在后台生成，但 Android 可能不显示状态栏图标。需要停止时请返回此聊天。</string>
+    <string name="chat_background_start_failed">无法启动后台生成，请保持应用打开后重试。</string>
 </resources>

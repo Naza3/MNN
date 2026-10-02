@@ -8,6 +8,8 @@ import com.alibaba.mnnllm.android.llm.LlmSession
 import com.alibaba.mnnllm.android.model.ModelUtils
 import com.alibaba.mnnllm.android.modelsettings.ModelConfig
 import java.io.File
+import com.alibaba.mnnllm.android.chat.background.BackgroundChatGeneration
+import com.alibaba.mnnllm.android.chat.background.ResidentModelStatus
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -16,10 +18,14 @@ object DefaultLlmRuntimeController : LlmRuntimeController {
         available = { !RuntimeOwnership.gate.isApiReserved() },
         cancelGeneration = { it.cancelGeneration() },
         detachUi = { it.detachUi() },
-        release = { it.release() },
+        release = {
+            try { it.release(); ResidentModelStatus.released(it) }
+            catch (error: Throwable) { ResidentModelStatus.cleanupFailed(it); throw error }
+        },
         retainOnAbandon = { com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(com.alibaba.mls.api.ApplicationProvider.get()) }
     )
     @Volatile private var residentModelId: String? = null
+    @Volatile private var residentConfiguration: String? = null
     @Volatile private var apiModelId: String? = null
 
     override fun ensureChatSession(modelId: String, modelName: String, configPath: String?,
@@ -52,12 +58,13 @@ object DefaultLlmRuntimeController : LlmRuntimeController {
 
     private fun acquire(modelId: String, modelName: String, path: String, appConfig: Boolean,
         sessionId: String?, history: List<ChatDataItem>?, force: Boolean, deferLoad: Boolean,
-        isCallerActive: () -> Boolean = { true }): ResidentChatRuntime.Attachment<ChatSession> {
+        isCallerActive: () -> Boolean = { true }): ResidentChatRuntime.Attachment<ChatSession> =
+        BackgroundChatGeneration.coordinator.transition(isCallerActive) {
         val id = sessionId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
         // A changed config must take effect on re-entry; never quietly reuse stale backend/model settings.
         val key = "$modelId|$path|$appConfig|${configFingerprint(modelId, path, appConfig)}"
         check(isCallerActive()) { "Chat was closed while reading configuration" }
-        return runtime.acquire(key, create = {
+        runtime.acquire(key, create = {
             ChatService.provide().createSession(modelId, modelName, id, history, path,
                 useNewConfig = !appConfig, useCustomConfig = appConfig)
         }, isWanted = isCallerActive, forceReload = force, prepare = { session, reused ->
@@ -65,7 +72,7 @@ object DefaultLlmRuntimeController : LlmRuntimeController {
             session.setKeepHistory(true)
             if (!deferLoad) session.load()
             residentModelId = modelId
-        })
+        }).also { residentConfiguration = key; ResidentModelStatus.loaded(modelId, modelName, path, it.session) }
     }
 
     private fun configFingerprint(modelId: String, path: String, appConfig: Boolean): String {
@@ -80,13 +87,23 @@ object DefaultLlmRuntimeController : LlmRuntimeController {
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
+    override fun canResumeChatSession(modelId: String, configPath: String?): Boolean {
+        val path = configPath ?: ModelUtils.getConfigPathForModel(modelId) ?: return false
+        return residentConfiguration == "$modelId|$path|true|${configFingerprint(modelId, path, true)}"
+    }
     override fun isChatAttachmentCurrent(session: ChatSession?, epoch: Long?): Boolean = runtime.isCurrent(session, epoch)
     override fun <T> withChatAttachment(session: ChatSession, epoch: Long?, action: () -> T): T =
         runtime.withAttachment(session, epoch, action)
     override fun tryWithChatAttachment(session: ChatSession, epoch: Long?, action: () -> Unit): Boolean =
         runtime.tryWithAttachment(session, epoch, action)
-    override fun detachChatSession(session: ChatSession, epoch: Long?, retain: Boolean) = runtime.detach(session, epoch, retain)
-    override fun unloadChatModel(): Boolean = runtime.unload()
+    override fun detachChatSession(session: ChatSession, epoch: Long?, retain: Boolean) {
+        if (!runtime.isCurrent(session, epoch)) return
+        BackgroundChatGeneration.coordinator.transition(isWanted = { runtime.isCurrent(session, epoch) }) { runtime.detach(session, epoch, retain) }
+    }
+    override fun detachCompletedChatSession(session: ChatSession, epoch: Long?, retain: Boolean) = runtime.detach(session, epoch, retain)
+    override fun unloadChatModel(): Boolean {
+        return BackgroundChatGeneration.coordinator.transition { runtime.unload() }
+    }
     override fun getResidentModelId(): String? = if (runtime.current()?.isModelLoaded() == true) residentModelId else null
     override fun getActiveSession(): LlmSession? = if (RuntimeOwnership.gate.isApiReserved()) null
         else (runtime.current() as? LlmSession)?.takeIf { it.isModelLoaded() }
@@ -97,17 +114,18 @@ object DefaultLlmRuntimeController : LlmRuntimeController {
         return runCatching { session.updateThinking(enabled); true }.getOrDefault(false)
     }
     override fun releaseSession(expected: LlmSession?, chatLeaseEpoch: Long?) {
-        if (expected != null) runtime.detach(expected, chatLeaseEpoch, false)
+        if (expected != null) detachChatSession(expected, chatLeaseEpoch, false)
     }
 
-    override fun ensureApiSession(modelId: String, apiEpoch: Long): EnsureSessionResult {
+    override fun ensureApiSession(modelId: String, apiEpoch: Long): EnsureSessionResult = BackgroundChatGeneration.coordinator.transition {
         RuntimeOwnership.gate.drainResident(apiEpoch)
         runtime.forgetReleased()
+        ResidentModelStatus.clear()
         residentModelId = null
         apiModelId = modelId
         val path = ModelConfig.getDefaultConfigFile(modelId)
-            ?: return EnsureSessionResult(false, reason = "MODEL_CONFIG_NOT_FOUND")
-        return try {
+            ?: return@transition EnsureSessionResult(false, reason = "MODEL_CONFIG_NOT_FOUND")
+        try {
             val session = LlmSession(modelId, "local_api_$apiEpoch", path, null,
                 useCustomConfig = false, apiEpoch = apiEpoch)
             session.setKeepHistory(false)

@@ -15,6 +15,40 @@ part of this build. Compiling these features is not proof of on-device GPU/NPU
 execution, inference quality, background survival, or Android 16KiB runtime
 compatibility.
 
+## Background text generation (833 / 0.8.3-localapi.3)
+
+User-started text chat generation is owned by an application-scoped job and
+the private `com.alibaba.mnnllm.android.chat.background.ChatGenerationService`,
+independently of the chat screen's lifetime. This path is for text-only chat;
+it does not extend background support to image, audio, video, or diffusion
+requests. Text chat and the OpenAI API retain one-owner runtime arbitration and
+share a single model-status notification rather than competing indicators.
+
+The chat service uses `specialUse` with an explicit subtype explanation for
+user-started model residency and text chat generation. Model loading, loaded
+residency, and active generation share its foreground lifetime. While generating,
+its low-importance notification shows status, a job-scoped Stop
+action, and a return-to-conversation action. The unified model indicator stays
+static while the model is loaded and idle, uses an animation-list icon and
+indeterminate progress while busy, and disappears when the model is unloaded.
+Completion returns to loaded-idle status when model retention is enabled. API
+handoff transfers notification ownership so stale chat updates cannot remove or
+overwrite API status. System UI may render notification icon animation
+differently across Android versions, devices, and Doze states; phase text and
+progress must remain understandable without animation. There is no per-token
+notification polling. Stop uses an explicit
+immutable service PendingIntent; no new broadcast receiver is introduced. Prompts and
+generated text are not notification content. A partial wake lock is held only
+during an active generation, with a 30-minute timeout and release on completion,
+failure, or service destruction. Idle model retention may retain the foreground
+indicator, but must not retain an active-generation wake lock.
+
+Chat replies are saved by the job rather than relying on an attached Activity.
+The service is non-sticky and does not replay a generation after process death.
+Force-stop, process termination, device shutdown, notification permission or
+channel settings, and vendor battery policies still require distinct device
+checks; a foreground service is not a guarantee of uninterrupted execution.
+
 ## Engine freshness and provenance
 
 `tools/local_api_ci/build-lock.json` pins the reviewed official, non-prerelease
@@ -120,6 +154,7 @@ export MNN_ENGINE_INSTALL_ROOT="$MNN_ENGINE_SOURCE_ROOT/project/android/build_64
 CI_TOOLS=apps/Android/MnnLlmChat/tools/local_api_ci
 python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
 python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
+python3 "$CI_TOOLS/verify_apk_metadata.py" --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
 python3 "$CI_TOOLS/verify_pem_scanner.py" --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
 bash "$CI_TOOLS/build_native.sh"
 bash "$CI_TOOLS/build_sherpa.sh"
@@ -177,12 +212,19 @@ only hashes, provenance, classifications, and offsets; no PEM bodies are logged.
 The audit separately verifies the actual Gradle runtime Netty JAR hash.
 
 Before native compilation, `verify_apk_metadata.py` builds tiny resource-only
-APKs with the locked SDK aapt2. It verifies numeric foreground-service flags,
+APKs with the locked SDK aapt2. It verifies both required private services,
+numeric foreground-service flags,
 optimized resource names/ZIP paths, every backup XML configuration, and retained
-diagnostics on a missing ZIP entry. Negative fixtures reject combined service
-flags, a permissive referenced XML even when an unrelated correct XML exists,
+diagnostics on a missing ZIP entry. Negative fixtures reject a missing or exported
+chat service (including an omitted explicit export setting), wrong/missing or
+combined chat service flags, a missing chat subtype explanation, combined API
+service flags, a permissive referenced XML even when an unrelated correct XML exists,
 and a permissive qualified XML variant. Results are in
 `apk-metadata-regression.json`; these fixtures do not exercise App/native code.
+For local fixture-only runs, `--platform` and `--apkanalyzer` may select an
+already-installed SDK platform/tool path; the report records that fixture SDK
+and platform hash. Such a run does not change the production SDK 35 lock or
+establish that the actual target-35 App APK passed its audit.
 
 Before native compilation, `verify_gradle_init.py` runs real Gradle against an
 SDK-free synthetic multi-project fixture with configuration-on-demand enabled.
@@ -208,7 +250,8 @@ Use suite names and lint IDs/locations in the compact reports to distinguish
 feature regressions from existing upstream failures.
 
 The static APK audit checks the real package/version/min/target SDK, private
-special-use foreground service and permission/subtype declaration, disabled
+special-use API and text-chat foreground services and permission/subtype
+declarations, the chat wake-lock permission, disabled
 backup (every compiled XML variant followed from the manifest resource ID),
 ARM64-only libraries, required JNI libraries, every ELF PT_LOAD page
 alignment, ZIP alignment, native dynamic-dependency closure, and obvious
@@ -245,6 +288,14 @@ Before declaring device acceptance, install the locally signed arm64 build and
 verify loopback-only binding, bearer-key rejection/rotation, API routes and SSE,
 stop/restart and request cancellation, one-owner UI/API runtime arbitration,
 notification controls, background/locked-screen behavior, and the real selected
-model. Test 16KiB devices separately where relevant. User-selected model
+model. For text chat, additionally check Home/lock during generation, Activity
+recreation and return to the same conversation, saved final and stopped output,
+repeated/stale notification Stop actions, completion and startup-failure service
+cleanup, notification permission/channel denial, and model/API takeover while a
+job is active. Verify that process death does not replay a request, that idle
+model retention shows a static indicator with no generation wake lock, that busy
+state remains visible when icon animation is unsupported, and that unloading
+removes the model indicator.
+Test 16KiB devices separately where relevant. User-selected model
 provisioning and its license review are separate from CI; no model is bundled
 or downloaded by this workflow.

@@ -48,11 +48,12 @@ class OpenAIService : Service() {
         // Repeated starts never replace the model or allocate another runtime.
         if (coordinator.epoch != null || stopping.get()) return START_NOT_STICKY
         try {
+            if (!coordinator.reserve()) { stopSelf(); return START_NOT_STICKY }
+            coordinator.activateNotificationOwnership { stopForeground(STOP_FOREGROUND_DETACH); requestStop() }
             val notification = coordinator.getNotification()
             if (Build.VERSION.SDK_INT >= 34) {
                 startForeground(ApiNotificationManager.NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             } else { startForeground(ApiNotificationManager.NOTIFICATION_ID, notification) }
-            if (!coordinator.reserve()) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return START_NOT_STICKY }
             currentModelId = model
             scope.launch { if (!coordinator.startServer(model)) requestStop() }
         } catch (e: Exception) { requestStop() }
@@ -64,7 +65,7 @@ class OpenAIService : Service() {
         scope.launch {
             val cleaned = coordinator.cleanup()
             if (cleaned) {
-                withContext(Dispatchers.Main) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
+                withContext(Dispatchers.Main) { coordinator.releaseNotificationOwnership { stopForeground(STOP_FOREGROUND_REMOVE) }; stopSelf() }
                 if (activeInstance === this@OpenAIService) activeInstance = null
                 scope.cancel()
             }

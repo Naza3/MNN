@@ -83,17 +83,21 @@ def validate_manifest(xml, expected):
     for name in ("package", "min_sdk", "target_sdk", "version_code", "version_name"):
         if report[name] != expected[name]:
             errors.append(f"Manifest {name}: expected {expected[name]}, got {report[name]}")
-    service = next((s for s in services if s["name"] == expected["service"]), None)
-    if not service:
-        errors.append("Local API foreground service is missing")
-    else:
-        if service["exported"] != "false":
-            errors.append("Local API service must explicitly be non-exported")
-        if not foreground_type_matches(service["foreground_service_type"], expected["foreground_service_type"]):
-            errors.append("Local API service must use specialUse, not a time-limited dataSync type")
-        if not service["properties"].get("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"):
-            errors.append("Local API special-use service requires a subtype explanation")
-    for permission in ("INTERNET", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_SPECIAL_USE", "POST_NOTIFICATIONS"):
+    for key, label in (("service", "Local API"), ("chat_service", "Background chat")):
+        matching = [s for s in services if s["name"] == expected[key]]
+        if not matching:
+            errors.append(f"{label} foreground service is missing")
+            continue
+        if len(matching) != 1:
+            errors.append(f"{label} foreground service must be declared exactly once")
+        for service in matching:
+            if service["exported"] != "false":
+                errors.append(f"{label} service must explicitly be non-exported")
+            if not foreground_type_matches(service["foreground_service_type"], expected["foreground_service_type"]):
+                errors.append(f"{label} service must use specialUse, not a time-limited dataSync type")
+            if not (service["properties"].get("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE") or "").strip():
+                errors.append(f"{label} special-use service requires a subtype explanation")
+    for permission in ("INTERNET", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_SPECIAL_USE", "POST_NOTIFICATIONS", "WAKE_LOCK"):
         if "android.permission." + permission not in permissions:
             errors.append(f"Missing permission: {permission}")
     if report["debuggable"] != "false":

@@ -19,7 +19,12 @@ class ApiServiceCoordinator(private val context: Context) {
     private val lifecycle = LocalApiLifecycle(RuntimeOwnership.gate, load = { epoch ->
         val result = ServiceLocator.getLlmRuntimeController().ensureApiSession(checkNotNull(modelId), epoch)
         check(result.success && result.session != null) { "Cannot load the selected model" }
-        LlmSessionBackend(result.session!!)
+        val backend = LlmSessionBackend(result.session!!)
+        LocalInferenceBackend { prompt, onToken ->
+            setGenerationActive(true)
+            try { backend.generate(prompt, onToken) }
+            finally { setGenerationActive(false) }
+        }
     }, transportFactory = { worker ->
         val port = ApiServerConfig.getPort(context)
         ApiServerConfig.validateEndpoint(ApiServerConfig.LOOPBACK, port)
@@ -56,9 +61,25 @@ class ApiServiceCoordinator(private val context: Context) {
     val isServerRunning: Boolean get() = lifecycle.isReady()
     fun initialize() = true
     fun reserve(): Boolean = lifecycle.reserve()
-    suspend fun startServer(modelId: String): Boolean { this.modelId = modelId; return lifecycle.start() }
+    suspend fun startServer(modelId: String): Boolean {
+        this.modelId = modelId
+        com.alibaba.mnnllm.android.chat.background.BackgroundChatGeneration.coordinator.cancelAndDrain()
+        return lifecycle.start()
+    }
     fun requestStop() = lifecycle.requestStop()
-    suspend fun cleanup(): Boolean = lifecycle.cleanup()
+    suspend fun cleanup(): Boolean {
+        com.alibaba.mnnllm.android.chat.background.BackgroundChatGeneration.coordinator.cancelAndDrain()
+        return lifecycle.cleanup()
+    }
+    fun activateNotificationOwnership(onRevoked: () -> Unit) = notifications.activate(onRevoked)
+    fun releaseNotificationOwnership(removeForeground: () -> Unit) = notifications.release(removeForeground)
+    private fun setGenerationActive(active: Boolean) = runCatching {
+        notifications.generating = active
+        if (RuntimeOwnership.gate.state == RuntimeOwnerGate.State.READY_API) {
+            updateNotification(context.getString(if (active) R.string.chat_background_generating else R.string.local_api_ready),
+                modelId ?: context.getString(R.string.local_api_title))
+        }
+    }
     fun getBootstrapCount() = lifecycle.bootstrapCount
     fun getServerPort(): Int? = if (epoch != null) ApiServerConfig.getPort(context) else null
     fun getNotification() = notifications.buildNotification(context.getString(R.string.local_api_notification_starting), context.getString(R.string.local_api_wait_load), ApiServerConfig.getPort(context))

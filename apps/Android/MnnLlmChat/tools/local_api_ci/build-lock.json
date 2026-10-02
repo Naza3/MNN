@@ -130,6 +130,7 @@
     "min_sdk": "26",
     "target_sdk": "35",
     "service": "com.alibaba.mnnllm.api.openai.service.OpenAIService",
+    "chat_service": "com.alibaba.mnnllm.android.chat.background.ChatGenerationService",
     "foreground_service_type": "specialUse",
     "native_libraries": [
       "libMNN.so",
@@ -137,8 +138,8 @@
       "libmnn_tts.so",
       "libsherpa-mnn-jni.so"
     ],
-    "version_code": "832",
-    "version_name": "0.8.3-localapi.2"
+    "version_code": "833",
+    "version_name": "0.8.3-localapi.3"
   },
   "public_test_fixture": {
     "coordinate": "io.netty:netty-handler:4.1.119.Final",

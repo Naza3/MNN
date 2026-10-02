@@ -1,7 +1,7 @@
 # MNN Chat API (local-only fork)
 
 This fork uses package `io.github.naza3.mnnchat`, display name **MNN Chat API**, and version
-`0.8.3-localapi.2` (832). Its Android/JNI namespace stays unchanged. It installs beside the
+`0.8.3-localapi.3` (833). Its Android/JNI namespace stays unchanged. It installs beside the
 upstream app, does not migrate/read its private data, and does not offer upstream APK updates.
 Download/import models within this fork using the existing model manager.
 
@@ -24,7 +24,7 @@ Download/import models within this fork using the existing model manager.
 ## 保持模型加载（832 / localapi.2）
 
 - **设置 → 通用 → 退出聊天后保持模型加载** 默认开启，升级时缺少这个新偏好也按开启处理。
-  返回模型列表或重建聊天 Activity，只停止该页生成并解绑 UI，保留同一份模型权重。
+  返回模型列表或重建聊天 Activity 会解绑旧 UI，保留同一份模型权重。833 起纯文本后台生成不随 UI 销毁而停止。
 - 再次打开相同模型无需重复加载权重。新聊天使用空历史；打开历史记录使用明确选定的会话，
   重绑时清空旧 KV/native history，不会把另一会话带入。已保存的数据库记录不受卸载影响。
 - **聊天菜单 → 卸载当前模型**，或 **设置 → 通用 → 卸载当前模型**，会先停止生成，等待
@@ -34,7 +34,7 @@ Download/import models within this fork using the existing model manager.
 - 本机 API 仍需要主动启动。**停止 API 就是主动卸载 API 模型**，必须完成真实清理；普通返回
   模型列表不会停止 API。API 与聊天不共享聊天历史，也不会同时加载两份模型。
 - 保留权重会占用 RAM，并可能增加耗电。Android 低内存回收、强制结束或进程重启仍会卸载。
-  此选项不会启动新的后台服务，不会开机自启或在进程结束后自动恢复模型。
+  833 起已加载的聊天模型使用同一个前台状态通知；空闲时不持有唤醒锁。不会开机自启或在进程结束后自动恢复模型。
 - API 控制页按状态栏、导航栏、屏幕开孔和键盘的 WindowInsets 留出空间，旋转后重新计算；
   不使用固定像素值顶开状态栏。页内仍可滚动到所有按钮。
 
@@ -43,6 +43,46 @@ lifetime is the current process, not a guarantee against Android reclaiming it. 
 can have only one current UI attachment; older callbacks cannot release or mutate a newer attachment.
 Configuration fingerprint changes require a safe reload. API Stop always drains and releases its own
 runtime, regardless of this chat preference.
+
+## 后台文本生成与统一状态图标（833 / localapi.3）
+
+- 打开模型后，状态栏使用一个模型状态图标。模型已加载但空闲时为静态图标；纯文本思考/输出时，
+  同一个通知切换为动画图标并显示不确定进度；生成结束回到静态已加载状态；卸载后移除。
+  动画由 Android System UI 播放，不按 token 刷新通知。部分系统/OEM、息屏或 Doze 可能显示静态帧，
+  此时以通知中的“正在生成/正在停止/模型已加载”文字和进度为准。
+- 纯文本聊天由独立的前台服务任务执行。按 Home、返回列表或 Activity 重建不会取消这项任务；
+  通知可返回对应会话或停止当前回复。旧通知的停止/卸载按钮不会作用于后来的任务或模型。
+- 回复及部分停止结果由任务统一保存一次；重新打开页面只观察已有任务，不重复提交、不重置正在使用的 KV。
+  保存失败会在聊天页明确提示，不能把未保存的屏幕内容当作持久记录。
+- “保持模型加载”开启时，生成完成后保留权重和静态状态通知；关闭时，最后一个聊天页面离开后，
+  等后台任务安全结束再卸载。空闲通知的“卸载当前模型”会释放权重并关闭通知。
+- API 和聊天仍共用单一 native runtime，仍然需要用户主动启动 API。两种服务交接同一个通知身份；
+  旧服务先退出前台状态，过期更新/移除不会覆盖新服务。两者复用原有 API 通知渠道，保留用户设置的
+  通知重要程度和禁用状态，不创建替代渠道绕过禁用。API 执行推理时也使用忙碌图标。
+- Android 13+ 首次使用会请求通知权限。拒绝或关闭通知渠道后，Android 可能不显示状态栏图标；
+  页面会说明限制，可以回聊天页停止。不会自动修改通知设置或请求电池优化豁免。
+- 本次保证的后台任务路径仅限纯文本模型和纯文本输入。图片/视觉、扩散、音频/Omni、语音聊天及其 TTS、页面内基准测试
+  保持原有页面路径，不声称已支持后台生成。NPU 支持暂不处理。
+- 模型加载/驻留和生成使用私有 `specialUse` 前台服务，无开机启动、静默重启或请求重放。
+  生成时可持有最长 30 分钟的部分唤醒锁，结束/停止/异常后释放；空闲权重不持锁。
+  Android/OEM 的低内存回收、强制结束和电池策略仍可能终止进程，不能保证一直后台运行。
+
+### Background chat ownership
+
+`ChatGenerationCoordinator` owns a single request with an immutable conversation ID, native attachment,
+job ID, bounded immutable output snapshots and one database persistence path. UI observers have separate
+revocable tokens. Reattaching the same job does not reload weights, clear history or submit another prompt.
+Runtime transitions block new admission while cancellation, native drain and persistence finish. A failed
+save is never published as saved. Foreground-only voice/custom listeners retire a completed background
+attachment before taking control.
+
+`ChatGenerationService` is `START_NOT_STICKY`. Host/generation intents require matching process-local
+admission; saved intents cannot replay work after process death. Residency is published from confirmed
+native load/release transitions. `ForegroundNotificationOwner` arbitrates notification ID 1001 between
+Chat and API, demoting the previous service before promotion and rejecting stale removal/update calls.
+Both reuse the existing `local_api_service` channel and preserve its user-controlled importance/block settings.
+Notifications contain only model/status, never prompts, responses or API credentials. Animation-list
+support is best-effort; state text and indeterminate progress provide the fallback.
 
 ## Start and connect
 
@@ -126,7 +166,7 @@ App tests under `com.alibaba.mnnllm.api.openai` cover the owner gate, the produc
 coordinator core with a fake native runtime, bounded FIFO/cancellation/prefill cleanup, parser
 limits/auth/routes, real Netty TCP close for streaming and non-streaming calls, and Robolectric
 manifest/Activity control lifecycle. Tests use ephemeral fake keys and no model downloads.
-Run `:app:testStandardDebugUnitTest --tests 'com.alibaba.mnnllm.api.openai.*'` in the configured
+Run `:app:testStandardDebugUnitTest` in the configured
 Android build. The full CI also builds the current pinned MNN sources and the APK.
 
 **Device acceptance remains required:** install this fork beside the official app, download a
@@ -134,3 +174,16 @@ small supported text model, test actual text/SSE and token limits, background th
 turn the screen off, reconnect a client, disconnect during prefill/decode, Stop during loading,
 repeat start/stop, exercise failed bind, and return to Chat. No device or native-inference result
 is implied by fake-backend JVM/Robolectric tests.
+
+Background-specific tests under `com.alibaba.mnnllm.android.chat.background` cover coordinator ownership,
+Home/detach/recreate simulation, stop/drain, stale observer/action and transition tokens, exactly-once
+process-local persistence, save failure, fast host admission, bounded output, and notification arbitration.
+Robolectric service tests check the actual manifest, foreground promotion, idle wake-lock absence,
+private immutable notifications, return intents and disabled-channel handling. Pure JVM tests do not
+prove actual Android process priority, status-bar animation, or native background execution.
+
+**833 phone acceptance:** allow and deny notification permission; load a small text model; confirm the
+static indicator; generate while pressing Home and with screen off; return during and after completion;
+stop during prefill/decode; recreate the Activity; verify history is not duplicated; test retention ON/OFF,
+old Stop/Unload intents after a newer request, actual unload, model/config switch, and Chat/API handoff.
+Check there is one status indicator, no idle wake lock, and no automatic generation after force-stop.

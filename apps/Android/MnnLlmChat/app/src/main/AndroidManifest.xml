@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -63,6 +64,14 @@
         <service
             android:name="com.alibaba.mls.api.download.DownloadForegroundService"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name="com.alibaba.mnnllm.android.chat.background.ChatGenerationService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-started on-device model residency and text chat generation with a visible status notification and job-scoped stop control" />
+        </service>
 
         <activity android:name="com.alibaba.mnnllm.api.openai.ui.LocalApiActivity" android:exported="false" />
 

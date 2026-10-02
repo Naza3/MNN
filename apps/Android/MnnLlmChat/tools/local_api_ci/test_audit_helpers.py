@@ -2,12 +2,14 @@ import json
 from pathlib import Path
 import struct
 import unittest
+import xml.etree.ElementTree as ET
 
 from audit_apk import (elf_load_segments, suspicious_entry, validate_manifest,
                        validate_extraction_rules, dynamic_symbols, resolve_extraction_resources,
                        foreground_type_matches)
 
 LOCK = json.loads((Path(__file__).parent/'build-lock.json').read_text())
+ANDROID = '{http://schemas.android.com/apk/res/android}'
 
 
 def elf_fixture(machine=183, alignment=16384):
@@ -23,12 +25,33 @@ def elf_fixture(machine=183, alignment=16384):
 def manifest(exported='false', service_type='specialUse'):
     expected=LOCK['expected_apk']
     permissions=''.join(f'<uses-permission android:name="android.permission.{name}" />'
-                        for name in ['INTERNET','FOREGROUND_SERVICE','FOREGROUND_SERVICE_SPECIAL_USE','POST_NOTIFICATIONS'])
+                        for name in ['INTERNET','FOREGROUND_SERVICE','FOREGROUND_SERVICE_SPECIAL_USE','POST_NOTIFICATIONS','WAKE_LOCK'])
     return f'''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{expected['package']}" android:versionCode="{expected['version_code']}" android:versionName="{expected['version_name']}">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />{permissions}
     <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/local_api_data_extraction_rules"><service android:name="{expected['service']}" android:exported="{exported}"
     android:foregroundServiceType="{service_type}"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-    android:value="Local inference" /></service></application></manifest>'''
+    android:value="Local inference" /></service>
+    <service android:name="{expected['chat_service']}" android:exported="false"
+    android:foregroundServiceType="specialUse"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+    android:value="User-started on-device text generation" /></service></application></manifest>'''
+
+
+def chat_manifest(attribute=None, value=None, remove=False, duplicate=False, subtype=True):
+    root = ET.fromstring(manifest())
+    app = root.find('application')
+    service = next(s for s in app.findall('service') if s.get(ANDROID + 'name') == LOCK['expected_apk']['chat_service'])
+    if attribute:
+        if value is None:
+            service.attrib.pop(ANDROID + attribute)
+        else:
+            service.set(ANDROID + attribute, value)
+    if remove:
+        app.remove(service)
+    if duplicate:
+        app.append(ET.fromstring(ET.tostring(service)))
+    if not subtype:
+        service.remove(service.find('property'))
+    return ET.tostring(root, encoding='unicode')
 
 
 class AuditHelpersTest(unittest.TestCase):
@@ -49,6 +72,42 @@ class AuditHelpersTest(unittest.TestCase):
 
     def test_time_limited_service_rejected(self):
         self.assertTrue(any('specialUse' in x for x in validate_manifest(manifest(service_type='dataSync'),LOCK['expected_apk'])[1]))
+
+    def test_missing_chat_service_rejected(self):
+        self.assertEqual(['Background chat foreground service is missing'],
+                         validate_manifest(chat_manifest(remove=True), LOCK['expected_apk'])[1])
+
+    def test_duplicate_chat_service_rejected(self):
+        self.assertEqual(['Background chat foreground service must be declared exactly once'],
+                         validate_manifest(chat_manifest(duplicate=True), LOCK['expected_apk'])[1])
+
+    def test_exported_or_implicit_chat_service_rejected(self):
+        for exported in ('true', None):
+            with self.subTest(exported=exported):
+                self.assertEqual(['Background chat service must explicitly be non-exported'],
+                                 validate_manifest(chat_manifest('exported', exported), LOCK['expected_apk'])[1])
+
+    def test_wrong_or_missing_chat_service_type_rejected(self):
+        for value in ('dataSync', 'specialUse|dataSync', '0x40000001', '0x1', None):
+            with self.subTest(value=value):
+                self.assertEqual(['Background chat service must use specialUse, not a time-limited dataSync type'],
+                                 validate_manifest(chat_manifest('foregroundServiceType', value), LOCK['expected_apk'])[1])
+
+    def test_chat_service_compiled_type_accepted(self):
+        for value in ('specialUse', '0x40000000', '1073741824'):
+            with self.subTest(value=value):
+                self.assertEqual([], validate_manifest(chat_manifest('foregroundServiceType', value), LOCK['expected_apk'])[1])
+
+    def test_chat_service_subtype_required(self):
+        self.assertEqual(['Background chat special-use service requires a subtype explanation'],
+                         validate_manifest(chat_manifest(subtype=False), LOCK['expected_apk'])[1])
+
+    def test_chat_wake_lock_permission_required(self):
+        root = ET.fromstring(manifest())
+        permission = next(p for p in root.findall('uses-permission') if p.get(ANDROID + 'name') == 'android.permission.WAKE_LOCK')
+        root.remove(permission)
+        self.assertEqual(['Missing permission: WAKE_LOCK'],
+                         validate_manifest(ET.tostring(root, encoding='unicode'), LOCK['expected_apk'])[1])
 
     def test_wrong_version_rejected(self):
         xml=manifest().replace('android:versionCode="'+LOCK['expected_apk']['version_code']+'"','android:versionCode="830"')

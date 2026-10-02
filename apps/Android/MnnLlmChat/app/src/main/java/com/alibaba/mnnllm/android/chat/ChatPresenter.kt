@@ -5,6 +5,10 @@
 package com.alibaba.mnnllm.android.chat
 
 import android.text.TextUtils
+import com.alibaba.mnnllm.android.chat.background.BackgroundChatGeneration
+import com.alibaba.mnnllm.android.chat.background.ChatGenerationCoordinator
+import com.alibaba.mnnllm.android.chat.background.ChatGenerationService
+import kotlinx.coroutines.Job
 import android.util.Log
 import androidx.lifecycle.lifecycleScope
 import com.alibaba.mls.api.ModelItem
@@ -48,6 +52,9 @@ class ChatPresenter(
     private var runtimeLeaseEpoch: Long? = null
     private val presenterScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val callbackGuard = com.alibaba.mnnllm.api.openai.runtime.ChatCallbackGuard()
+    @Volatile private var backgroundAttachment: ChatGenerationCoordinator.Attachment<BackgroundChatGeneration.Lease>? = null
+    private var backgroundObservation: Job? = null
+    private val background get() = BackgroundChatGeneration.coordinator
     private val additionalListeners = mutableListOf<GenerateListener>()
     
     /**
@@ -90,55 +97,87 @@ class ChatPresenter(
     }
 
     fun isCurrentAttachment(): Boolean = !destroyed && ::chatSession.isInitialized &&
-        ServiceLocator.getLlmRuntimeController().isChatAttachmentCurrent(chatSession, runtimeLeaseEpoch)
+        ServiceLocator.getLlmRuntimeController().isChatAttachmentCurrent(chatSession, runtimeLeaseEpoch) &&
+        (backgroundAttachment?.let { background.owns(it) } != false)
+
+    fun ownsBackgroundResponse(): Boolean = backgroundAttachment != null
+
+    private fun retireBackground(): Boolean {
+        val attachment = backgroundAttachment ?: return true
+        if (!background.retire(attachment)) return false
+        backgroundObservation?.cancel()
+        backgroundAttachment = null
+        return true
+    }
+
+    fun restoreBackgroundResponse(): Boolean {
+        val attachment = backgroundAttachment ?: return false
+        if (!background.owns(attachment)) return false
+        chatActivity.chatListComponent.setup(modelName, BackgroundChatGeneration.history(attachment.job))
+        observeBackground(attachment)
+        return true
+    }
+
+    private fun observeBackground(attachment: ChatGenerationCoordinator.Attachment<BackgroundChatGeneration.Lease>) {
+        backgroundObservation?.cancel()
+        chatActivity.onGenerateStart(BackgroundChatGeneration.userItem(attachment.job))
+        backgroundObservation = chatActivity.lifecycleScope.launch {
+            var reportedFailure = false
+            attachment.job.state.collect { snapshot ->
+                if (!destroyed && backgroundAttachment === attachment && background.owns(attachment)) {
+                    chatActivity.renderBackgroundGeneration(snapshot)
+                    if (snapshot.phase == ChatGenerationCoordinator.Phase.FAILED && !reportedFailure) {
+                        reportedFailure = true
+                        chatActivity.showBackgroundGenerationFailure(snapshot.result["message"] as? String)
+                    }
+                }
+            }
+        }
+    }
 
     fun getRuntimeLeaseEpoch(): Long? = runtimeLeaseEpoch
 
     fun createSession(): ChatSession {
         val intent = chatActivity.intent
         sessionId = intent.getStringExtra("chatSessionId")
-        Log.d(TAG, "createSession: received chatSessionId from intent: $sessionId")
-        val chatDataItemList: List<ChatDataItem>?
-        if (!TextUtils.isEmpty(sessionId)) {
-            chatDataItemList = chatDataManager!!.getChatDataBySession(sessionId!!)
-            Log.d(TAG, "createSession: queried database, got ${chatDataItemList.size} items for sessionId=$sessionId")
-            if (chatDataItemList.isNotEmpty()) {
-                sessionName = chatDataItemList[0].text
-                Log.d(TAG, "createSession: first item text (sessionName): $sessionName")
-            }
-            Log.d(TAG, "createSession: loaded ${chatDataItemList.size} history items for sessionId=$sessionId")
-        } else {
-            chatDataItemList = null
-            Log.d(TAG, "createSession: no sessionId provided, starting new session")
-        }
-        
-        val configPath = if (ModelTypeUtils.isDiffusionModel(modelName)) {
-            intent.getStringExtra("diffusionDir")
-        } else {
-            intent.getStringExtra("configFilePath")
-        }
-        
-        Log.d(TAG, "createSession: isDiffusion=${ModelTypeUtils.isDiffusionModel(modelName)}, modelName=$modelName, configPath=$configPath")
-        
+        val configPath = intent.getStringExtra(if (ModelTypeUtils.isDiffusionModel(modelName)) "diffusionDir" else "configFilePath")
         check(!destroyed) { "Chat was closed before loading" }
-        val result = ServiceLocator.getLlmRuntimeController().ensureChatSession(
-            modelId, modelName, configPath, sessionId, chatDataItemList, isCallerActive = { !destroyed }
-        )
-        runtimeLeaseEpoch = result.chatLeaseEpoch
-        chatSession = result.session
-        if (destroyed) {
-            ServiceLocator.getLlmRuntimeController().detachChatSession(chatSession, runtimeLeaseEpoch,
-                com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(chatActivity))
-            throw CancellationException("Chat was closed while loading")
+        if (ServiceLocator.getLlmRuntimeController().canResumeChatSession(modelId, configPath)) {
+            background.attach(modelId, sessionId)?.let { attachment ->
+                backgroundAttachment = attachment
+                chatSession = attachment.job.session.native
+                runtimeLeaseEpoch = attachment.job.session.epoch
+                sessionId = attachment.job.request.conversationId
+                sessionName = attachment.job.request.text
+                if (destroyed) {
+                    background.detachObserver(attachment)
+                    throw CancellationException("Chat was closed while attaching")
+                }
+                return chatSession
+            }
         }
-        sessionId = chatSession.sessionId
-        chatSession.setKeepHistory(true)
-        
-        Log.d(TAG, "createSession: created session with sessionId=$sessionId, historySize=${chatSession.getHistory()?.size ?: 0}")
-        return chatSession
+        return background.transition(isWanted = { !destroyed }) {
+            // Read history after drain/persistence, including a response finished during config change.
+            val history = sessionId?.takeIf { it.isNotBlank() }?.let { chatDataManager!!.getChatDataBySession(it) }
+            sessionName = history?.firstOrNull()?.text
+            val result = ServiceLocator.getLlmRuntimeController().ensureChatSession(
+                modelId, modelName, configPath, sessionId, history, isCallerActive = { !destroyed }
+            )
+            runtimeLeaseEpoch = result.chatLeaseEpoch
+            chatSession = result.session
+            if (destroyed) {
+                ServiceLocator.getLlmRuntimeController().detachChatSession(chatSession, runtimeLeaseEpoch,
+                    com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(chatActivity))
+                throw CancellationException("Chat was closed while loading")
+            }
+            sessionId = chatSession.sessionId
+            chatSession.setKeepHistory(true)
+            chatSession
+        }
     }
 
     fun load() {
+        if (backgroundAttachment != null) { chatActivity.onLoadingChanged(false); return }
         Log.d(TAG, "current SessionId: $sessionId")
         val sessionForLoad = chatSession
         val leaseForLoad = runtimeLeaseEpoch
@@ -179,6 +218,7 @@ class ChatPresenter(
 
     fun reset(onResetSuccess: (newSessionId: String) -> Unit) {
         if (!isCurrentAttachment()) return
+        if (!retireBackground()) return
         val sessionToReset = chatSession
         val leaseToReset = runtimeLeaseEpoch
         val callbackToken = callbackGuard.beginReset() ?: return
@@ -194,6 +234,7 @@ class ChatPresenter(
                         if (!destroyed && chatSession === sessionToReset && runtimeLeaseEpoch == leaseToReset &&
                             ServiceLocator.getLlmRuntimeController().isChatAttachmentCurrent(sessionToReset, leaseToReset)) {
                             sessionId = newId
+                            com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.refreshConversation(sessionToReset)
                             sessionName = null
                             onResetSuccess(newId)
                             chatActivity.onLoadingChanged(false)
@@ -293,7 +334,14 @@ class ChatPresenter(
     }
 
 
-    suspend fun requestGenerate(userData: ChatDataItem, generateListener: GenerateListener? = null): HashMap<String, Any> {
+    suspend fun requestGenerate(userData: ChatDataItem, generateListener: GenerateListener? = null, allowBackground: Boolean = true): HashMap<String, Any> {
+        if (allowBackground && isCurrentAttachment() && generateListener == null && additionalListeners.isEmpty() &&
+            !ModelTypeUtils.isMultiModalModel(modelId) && !ModelTypeUtils.isMultiModalModel(modelName) &&
+            userData.imageUris.isNullOrEmpty() && userData.audioUri == null && userData.videoUri == null &&
+            !userData.text.isNullOrBlank()) {
+            return requestBackgroundText(userData)
+        }
+        if (!retireBackground()) return hashMapOf("error" to true, "message" to "A chat response is still finishing")
         if (!isCurrentAttachment()) return hashMapOf("error" to true, "message" to "This chat is no longer attached to the model")
         val sessionForRequest = chatSession
         val leaseForRequest = runtimeLeaseEpoch
@@ -373,7 +421,25 @@ class ChatPresenter(
         }
     }
 
+    private suspend fun requestBackgroundText(userData: ChatDataItem): HashMap<String, Any> {
+        // Admission and FGS startup happen synchronously from the visible Send action, before await.
+        if (callbackGuard.tryNext { sessionId } == null) return hashMapOf("error" to true, "message" to "Conversation reset is still in progress")
+        val conversation = sessionId ?: return hashMapOf("error" to true)
+        val attachment = try {
+            background.admit(ChatGenerationCoordinator.Request(conversation, modelId, modelName,
+                chatActivity.intent.getStringExtra("configFilePath"), userData.text!!, userData.time),
+                BackgroundChatGeneration.Lease(chatSession, runtimeLeaseEpoch, conversation))
+        } catch (_: IllegalStateException) { return hashMapOf("error" to true, "message" to "A chat response is still finishing") }
+        backgroundAttachment = attachment
+        observeBackground(attachment)
+        chatActivity.requestBackgroundNotificationPermission()
+        try { ChatGenerationService.start(chatActivity, attachment.job.id) }
+        catch (_: Exception) { chatActivity.showBackgroundStartFailure() }
+        return HashMap(attachment.job.completion.await())
+    }
+
     fun stopGenerate() {
+        backgroundAttachment?.let { background.stop(it.job.id, it.observer); return }
         stopGenerating = true
     }
     
@@ -415,8 +481,11 @@ class ChatPresenter(
     fun destroy() {
         callbackGuard.invalidate()
         destroyed = true
-        stopGenerate()
+        backgroundObservation?.cancel()
+        val backgroundOwned = backgroundAttachment
+        if (backgroundOwned != null) background.detachObserver(backgroundOwned) else stopGenerate()
         presenterScope.cancel("ChatPresenter destroy")
+        if (backgroundOwned != null) return
         val sessionToRelease = if (::chatSession.isInitialized) chatSession else null
         val leaseToRelease = runtimeLeaseEpoch
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
@@ -453,9 +522,13 @@ class ChatPresenter(
     fun setEnableAudioOutput(enable: Boolean) = mutateSession { it.setEnableAudioOutput(enable) }
 
     suspend fun prepareBenchmarkMessage(expected: ChatSession, epoch: Long?) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        check(retireBackground()) { "A chat response is still finishing" }
         ServiceLocator.getLlmRuntimeController().withChatAttachment(expected, epoch) {
             expected.setKeepHistory(false)
-            expected.reset()
+            expected.reset().also {
+                sessionId = it
+                com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.refreshConversation(expected)
+            }
         }
     }
 
@@ -470,6 +543,11 @@ class ChatPresenter(
         onSessionCreated: (ChatSession) -> Unit
     ) {
         val switchToken = callbackGuard.beginReset() ?: return
+        stopGenerate()
+        backgroundObservation?.cancel()
+        backgroundAttachment = null
+        val hosting = com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.beginLoading(newModelItem.modelId!!, newModelItem.modelName!!)
+        try { ChatGenerationService.startHosting(chatActivity, hosting.token) } catch (_: Exception) { chatActivity.showBackgroundStartFailure() }
         presenterScope.launch {
             try {
                 chatActivity.lifecycleScope.launch {
@@ -503,7 +581,7 @@ class ChatPresenter(
                         }
                     }
                 }
-            }
+            } finally { com.alibaba.mnnllm.android.chat.background.ResidentModelStatus.finishLoading(hosting.token) }
         }
     }
     

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_model_loaded">Model loaded</string>
+    <string name="chat_model_loading">Loading model</string>
+    <string name="chat_model_cleanup_failed">Model cleanup failed; restart the app</string>
+</resources>

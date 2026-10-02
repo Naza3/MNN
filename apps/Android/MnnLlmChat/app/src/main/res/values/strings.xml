@@ -676,4 +676,15 @@
     <string name="save_image">Save Image</string>
     <string name="image_saved_to_gallery">Image saved to gallery</string>
     <string name="failed_to_save_image">Failed to save image</string>
+
+    <string name="chat_background_channel">Model status</string>
+    <string name="chat_background_channel_description">Model residency and generation status for chat and local API</string>
+    <string name="chat_background_generating">Generating chat response</string>
+    <string name="chat_background_stopping">Stopping after native work returns…</string>
+    <string name="chat_background_completed">Chat response saved</string>
+    <string name="chat_background_stopped">Generation stopped</string>
+    <string name="chat_background_failed">Chat generation failed</string>
+    <string name="chat_background_stop">Stop generation</string>
+    <string name="chat_background_notification_hint">Notifications are disabled. Background text generation can continue, but Android may hide its status icon. Return to this chat to stop it.</string>
+    <string name="chat_background_start_failed">Could not start background generation. Keep the app open and try again.</string>
 </resources>

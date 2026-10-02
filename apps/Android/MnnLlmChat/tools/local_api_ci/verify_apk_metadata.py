@@ -17,9 +17,20 @@ from audit_apk import audit_compiled_manifest
 HERE = Path(__file__).resolve().parent
 
 
-def manifest(expected, service_type='specialUse', resource='local_api_data_extraction_rules'):
+def manifest(expected, service_type='specialUse', resource='local_api_data_extraction_rules', chat_variant='good'):
     permissions = ''.join(f'<uses-permission android:name="android.permission.{name}"/>' for name in
-                          ['INTERNET', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_SPECIAL_USE', 'POST_NOTIFICATIONS'])
+                          ['INTERNET', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_SPECIAL_USE', 'POST_NOTIFICATIONS', 'WAKE_LOCK'])
+    exported = 'android:exported="true"' if chat_variant == 'exported' else 'android:exported="false"'
+    if chat_variant == 'implicit_export':
+        exported = ''
+    chat_type = {'wrong_type': 'dataSync', 'combined_type': 'specialUse|dataSync'}.get(chat_variant, 'specialUse')
+    type_attribute = '' if chat_variant == 'missing_type' else f'android:foregroundServiceType="{chat_type}"'
+    subtype = ('<property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" '
+               'android:value="Synthetic user-started on-device text generation fixture"/>')
+    if chat_variant == 'missing_subtype':
+        subtype = ''
+    chat = (f'<service android:name="{expected["chat_service"]}" {exported} {type_attribute}>'
+            f'{subtype}</service>') if chat_variant != 'missing' else ''
     return f'''<manifest xmlns:android="http://schemas.android.com/apk/res/android"
         package="{expected['package']}" android:versionCode="{expected['version_code']}"
         android:versionName="{expected['version_name']}">
@@ -28,7 +39,7 @@ def manifest(expected, service_type='specialUse', resource='local_api_data_extra
         android:dataExtractionRules="@xml/{resource}">
         <service android:name="{expected['service']}" android:exported="false" android:foregroundServiceType="{service_type}">
         <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="Synthetic local inference fixture"/>
-        </service></application></manifest>'''
+        </service>{chat}</application></manifest>'''
 
 
 def rules(exclude_all=True):
@@ -60,16 +71,24 @@ def main():
               'fixture_compile_sdk': args.platform,
               'platform_sha256': hashlib.sha256(platform.read_bytes()).hexdigest(), 'cases': []}
     cases = [
-        ('compiled_hex_manifest', False, 'specialUse', 'good', True),
-        ('optimized_names_and_paths', True, 'specialUse', 'good', True),
-        ('combined_service_flags_rejected', True, 'specialUse|dataSync', 'good', False),
-        ('wrong_referenced_xml_rejected', True, 'specialUse', 'wrong_reference', False),
-        ('unsafe_qualified_xml_rejected', True, 'specialUse', 'bad_qualified', False),
-        ('missing_zip_entry_keeps_diagnostics', True, 'specialUse', 'missing_entry', False),
+        ('compiled_hex_manifest', False, 'specialUse', 'good', 'good', None),
+        ('optimized_names_and_paths', True, 'specialUse', 'good', 'good', None),
+        ('combined_service_flags_rejected', True, 'specialUse|dataSync', 'good', 'good', 'Local API service must use specialUse'),
+        ('missing_chat_service_rejected', True, 'specialUse', 'good', 'missing', 'Background chat foreground service is missing'),
+        ('exported_chat_service_rejected', True, 'specialUse', 'good', 'exported', 'Background chat service must explicitly be non-exported'),
+        ('implicit_chat_service_export_rejected', True, 'specialUse', 'good', 'implicit_export', 'Background chat service must explicitly be non-exported'),
+        ('wrong_chat_service_type_rejected', True, 'specialUse', 'good', 'wrong_type', 'Background chat service must use specialUse'),
+        ('combined_chat_service_flags_rejected', True, 'specialUse', 'good', 'combined_type', 'Background chat service must use specialUse'),
+        ('missing_chat_service_type_rejected', True, 'specialUse', 'good', 'missing_type', 'Background chat service must use specialUse'),
+        ('missing_chat_service_subtype_rejected', True, 'specialUse', 'good', 'missing_subtype', 'Background chat special-use service requires a subtype explanation'),
+        ('wrong_referenced_xml_rejected', True, 'specialUse', 'wrong_reference', 'good', 'exclude all private domains'),
+        ('unsafe_qualified_xml_rejected', True, 'specialUse', 'bad_qualified', 'good', '(v31)'),
+        ('missing_zip_entry_keeps_diagnostics', True, 'specialUse', 'missing_entry', 'good', 'ZIP entry must exist exactly once'),
     ]
     try:
         with tempfile.TemporaryDirectory(prefix='mnn-apk-metadata-') as temporary:
-            for name, optimize, service_type, variant, success in cases:
+            for name, optimize, service_type, variant, chat_variant, expected_error in cases:
+                success = expected_error is None
                 root = Path(temporary) / name
                 (root / 'res/xml').mkdir(parents=True)
                 (root / 'res/xml/local_api_data_extraction_rules.xml').write_text(rules())
@@ -80,7 +99,7 @@ def main():
                 if variant == 'bad_qualified':
                     (root / 'res/xml-v31').mkdir()
                     (root / 'res/xml-v31/local_api_data_extraction_rules.xml').write_text(rules(False))
-                (root / 'AndroidManifest.xml').write_text(manifest(lock['expected_apk'], service_type, reference))
+                (root / 'AndroidManifest.xml').write_text(manifest(lock['expected_apk'], service_type, reference, chat_variant))
                 run(aapt2, 'compile', '--dir', root / 'res', '-o', root / 'resources.zip')
                 apk = root / 'unoptimized.apk'
                 run(aapt2, 'link', '-I', platform, '--manifest', root / 'AndroidManifest.xml', '-o', apk, root / 'resources.zip')
@@ -105,9 +124,20 @@ def main():
                     for diagnostic in ['apk-manifest.xml', 'apk-resource-entries.json', 'apk-xml-resource-table.txt']:
                         assert (output / name / diagnostic).is_file(), diagnostic
                 assert (not errors) == success, f'{name}: expected success={success}, errors={errors}'
+                if expected_error:
+                    assert any(expected_error in e for e in errors), f'{name}: wrong failure: {errors}'
                 raw_type = next(s['foreground_service_type'] for s in evidence['manifest']['services']
                                 if s['name'] == lock['expected_apk']['service'])
                 assert raw_type == ('0x40000001' if '|' in service_type else '0x40000000'), raw_type
+                chat = next((s for s in evidence['manifest']['services']
+                             if s['name'] == lock['expected_apk']['chat_service']), None)
+                if chat_variant == 'missing':
+                    assert chat is None, chat
+                else:
+                    expected_type = {'wrong_type': '0x1', 'combined_type': '0x40000001', 'missing_type': None}.get(chat_variant, '0x40000000')
+                    assert chat['foreground_service_type'] == expected_type, chat
+                    expected_export = {'exported': 'true', 'implicit_export': None}.get(chat_variant, 'false')
+                    assert chat['exported'] == expected_export, chat
                 resource = evidence['data_extraction_resource']
                 if optimize:
                     assert resource['resource_name'].endswith('0_resource_name_obfuscated'), resource
@@ -120,7 +150,8 @@ def main():
                     assert any('specialUse' in e for e in errors), errors
                 report['cases'].append({'name': name, 'passed': True, 'expected_audit_success': success,
                                         'apk_sha256': hashlib.sha256(apk.read_bytes()).hexdigest(),
-                                        'errors': errors, 'manifest_fgs_raw': raw_type, 'resource': resource})
+                                        'errors': errors, 'manifest_fgs_raw': raw_type,
+                                        'manifest_chat_service': chat, 'resource': resource})
         report['passed'] = True
     finally:
         (args.report_dir / 'apk-metadata-regression.json').write_text(json.dumps(report, indent=2) + '\n')

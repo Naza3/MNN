@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="chat_model_loaded">模型已加载</string>
+    <string name="chat_model_loading">正在加载模型</string>
+    <string name="chat_model_cleanup_failed">模型清理失败，请重启应用</string>
+</resources>

@@ -20,6 +20,7 @@ interface LlmRuntimeController {
         historyList: List<ChatDataItem>?, forceReload: Boolean = false,
         isCallerActive: () -> Boolean = { true }): EnsureChatSessionResult =
         throw UnsupportedOperationException("Chat residency is unavailable")
+    fun canResumeChatSession(modelId: String, configPath: String?): Boolean = true
     fun isChatAttachmentCurrent(session: ChatSession?, epoch: Long?): Boolean = true
     fun <T> withChatAttachment(session: ChatSession, epoch: Long?, action: () -> T): T = action()
     fun tryWithChatAttachment(session: ChatSession, epoch: Long?, action: () -> Unit): Boolean {
@@ -27,6 +28,8 @@ interface LlmRuntimeController {
         action(); return true
     }
     fun detachChatSession(session: ChatSession, epoch: Long?, retain: Boolean) { releaseSession(session as? LlmSession, epoch) }
+    /** Coordinator cleanup after persistence; must not await its own completion. */
+    fun detachCompletedChatSession(session: ChatSession, epoch: Long?, retain: Boolean) = detachChatSession(session, epoch, retain)
     fun unloadChatModel(): Boolean = false
     fun getResidentModelId(): String? = getActiveModelId()
 
