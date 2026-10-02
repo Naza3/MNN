@@ -22,23 +22,32 @@ At each job's start, `preflight.py` reads the public upstream `master` SHA once,
 requires it to equal that base, verifies ancestry and unchanged engine trees,
 and records the separate App feature SHA. If upstream has advanced, the job
 fails before building. Synchronize/rebase the feature branch, review upstream
-changes, update the engine lock, and rerun the checks. Never silently substitute
+changes, update the engine and Sherpa source/dependency locks, and rerun the checks. Never silently substitute
 an older runtime or download a floating `libMNN.so`. Commits appearing after a
 job's initial check do not alter that job's already-frozen source.
 
 The primary MNN library is compiled from this checkout into
 `project/android/build_64/lib/libMNN.so`; Gradle then builds the actual App JNI
 and `mnn_tts` JNI against it. The APK audit compares native Build IDs before and
-after AGP stripping, as well as recording both hashes. No native stubs are used
-for the final APK. JVM/Robolectric tests are host tests and do not replace a
-real-device JNI/inference smoke test.
+after AGP stripping, as well as recording both hashes. No native stubs or
+prebuilt Sherpa binaries are used for the final APK. JVM/Robolectric tests are
+host tests and do not replace a real-device JNI/inference smoke test.
 
-Upstream's existing auxiliary Sherpa JNI CDN ZIP is fetched from its fixed
-HTTPS URL and checked against the reviewed SHA-256 before extracting exactly
-one library. It is not a replacement MNN engine. If the CDN bytes change, the
-build fails. Its exact source revision/static-dependency closure is unresolved;
-see `tools/local_api_ci/NOTICE-AUDIT.md`. Do not call an artifact fully cleared
-for redistribution while that audit remains open.
+The auxiliary Sherpa ASR JNI is also built from the same locked repository
+source. Six fixed-version source archives are pre-downloaded with exact SHA-256
+verification, then consumed by the original FetchContent recipes (including
+the original OpenFST patch). No binary CDN is used. The configuration retains
+all Sherpa ASR entry points used by the App, while disabling unused Sherpa
+TTS, speaker diarization, demos, C API, WebSocket, PortAudio, Python, and tests.
+The separate App `mnn_tts` module is unaffected. Sherpa dependencies are static,
+with the shared C++ runtime and 16KiB page alignment; Eigen is restricted to its
+MPL2-compatible code. Required JNI exports and linked MNN symbols are checked.
+
+`sherpa-source-inputs.json`, `sherpa-provenance.json`, `sherpa-link.txt`, and the
+exact `sherpa-sources/` archives plus `sherpa-notices/` make the native inputs
+reviewable. Preserve the source/notices bundle when distributing the APK,
+especially the exact Eigen source. See `tools/local_api_ci/NOTICE-AUDIT.md` for
+the configured dependency/license evidence and remaining review boundaries.
 
 ## Toolchain and dependencies
 
@@ -76,8 +85,8 @@ export REPORT_DIR="$PWD/local-api-ci-report"
 CI_TOOLS=apps/Android/MnnLlmChat/tools/local_api_ci
 python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
 python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
-python3 "$CI_TOOLS/prepare_prebuilt.py" --report-dir "$REPORT_DIR"
 bash "$CI_TOOLS/build_native.sh"
+bash "$CI_TOOLS/build_sherpa.sh"
 bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest --tests 'com.alibaba.mnnllm.api.openai.*'
 bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest
 bash "$CI_TOOLS/run_gradle.sh" :app:lintStandardRelease
@@ -94,7 +103,7 @@ version; vision/audio macros are derived from the supported OpenCV/audio
 switches. Unused upstream `BUILD_PLUGIN`/`LLM_SUPPORT_*` command-line variables
 are not passed as if they enabled features.
 
-The native entrypoint refuses to reuse an existing CMake cache. Start a fresh
+Both native entrypoints refuse to reuse an existing CMake cache. Start a fresh
 checkout/build directory for a newly synchronized engine rather than risk stale
 libraries. `ADD_BUILTIN=false`, `ENABLE_FIREBASE=false`, and
 `USE_LOCAL_MARKWON=false` are enforced. Existing upstream Firebase runtime
@@ -103,6 +112,15 @@ Firebase code was removed. Signing environment variables are explicitly
 rejected. The scripts do not upload anything when run locally.
 
 ## Evidence and failure interpretation
+
+Before native compilation, `verify_gradle_init.py` runs real Gradle against an
+SDK-free synthetic multi-project fixture with configuration-on-demand enabled.
+It verifies explicit inventory task discovery, combined assembly/inventory task
+selection, and rejection of mismatched MNN provenance. A negative control
+reproduces the former `projectsEvaluated` task-registration failure. The actual
+init script registers tasks in `beforeProject` so task discovery is not delayed
+until after Gradle has selected the requested task graph. This fixture produces
+no Android APK or native library and is recorded in `gradle-init-regression.json`.
 
 The workflow executes focused local API tests, the full upstream App unit
 suite, release lint, unsigned assembly, and APK audit independently where
@@ -122,17 +140,19 @@ that arbitrary secrets can never exist in binaries. CI only uses synthetic
 fixture credentials. Test stdout and private model/chat data are not collected.
 
 Artifacts are retained for 14 days. Diagnostic reports upload even on failure;
-the APK uploads only after every required test/lint/build/audit gate succeeds. The evidence bundle includes
+the APK uploads only after every required test/lint/build/audit gate succeeds.
+The evidence bundle includes
 `stage-outcomes.json`, engine/App source identities, actual tool versions,
 focused/full test counts, lint locations, dependency hashes/notices, native
-build options, and `apk-audit.json`. An unresolved license audit must be disclosed when using an artifact; a passing
-build does not replace license closure or real-device validation.
+build options, and `apk-audit.json`. A passing build does not replace applicable
+distribution obligations or real-device validation.
 
 ## Signing and device acceptance
 
 CI produces an unsigned standard release APK for `io.github.naza3.mnnchat`.
-No keystore or private signing material is uploaded. Sign and re-verify the
-APK in a controlled local environment before installation; calculate the
+No keystore or private signing material is uploaded. Keep the accompanying
+source/notices bundle with any APK handed to another recipient. Sign and
+re-verify the APK in a controlled local environment before installation; calculate the
 signed APK's new SHA-256 and record its signer certificate. The person shipping
 future production releases must own and preserve their release key. This
 workflow does not promise a production signing identity or compatibility with

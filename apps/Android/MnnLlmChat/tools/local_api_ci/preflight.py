@@ -12,7 +12,7 @@ import sys
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[4]
 ENGINE_PATHS = ("CMakeLists.txt", "include", "source", "express", "transformers",
-                "tools", "project/android", "3rd_party", "schema/default", "schema/current", "cmake", "codegen")
+                "tools", "project/android", "3rd_party", "schema/default", "schema/current", "cmake", "codegen", "apps/frameworks/sherpa-mnn")
 
 
 def run(*args):

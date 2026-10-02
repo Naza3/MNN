@@ -1,15 +1,17 @@
+// Modified by MNN Chat API contributors, 2026: test the current row-based table renderer.
 package com.alibaba.mnnllm.android.chat.chatlist
 
 import android.os.Looper
-import android.text.Spanned
 import android.view.LayoutInflater
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.TextView
+import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import com.alibaba.mnnllm.android.R
 import com.alibaba.mnnllm.android.chat.model.ChatDataItem
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -22,7 +24,7 @@ import org.robolectric.Shadows.shadowOf
 class AssistantMarkdownTableRenderTest {
 
     @Test
-    fun `assistant markdown should render gfm tables with table spans`() {
+    fun `assistant markdown should render gfm tables as scrollable rows and cells`() {
         val activity = Robolectric.buildActivity(AppCompatActivity::class.java).setup().get()
         activity.setTheme(R.style.AppTheme)
         val itemView = LayoutInflater.from(activity)
@@ -41,14 +43,26 @@ class AssistantMarkdownTableRenderTest {
         shadowOf(Looper.getMainLooper()).idle()
 
         val chatText = itemView.findViewById<MarkdownMessageView>(R.id.tv_chat_text)
-        val rendered = (chatText.getChildAt(0) as TextView).text as Spanned
-        val spanNames = rendered.getSpans(0, rendered.length, Any::class.java)
-            .map { it.javaClass.simpleName }
-
-        assertTrue(
-            "Expected table-related spans for rendered markdown table, actual=$spanNames text=${rendered}",
-            spanNames.any { it.contains("Table", ignoreCase = true) }
+        assertEquals("A table is a single scrollable markdown block", 1, chatText.childCount)
+        val scroll = chatText.getChildAt(0) as HorizontalScrollView
+        assertTrue(scroll.isHorizontalScrollBarEnabled)
+        val table = scroll.getChildAt(0) as MarkdownTableView
+        assertEquals("Header plus two data rows; the delimiter is not a data row", 3, table.childCount)
+        val expected = listOf(
+            listOf("Model", "Params"),
+            listOf("Qwen3 30B-A3B", "30B"),
+            listOf("GPT-OSS 20B", "20B")
         )
+        expected.forEachIndexed { rowIndex, cells ->
+            val row = table.getChildAt(rowIndex) as LinearLayout
+            assertEquals(cells.size, row.childCount)
+            cells.forEachIndexed { column, text ->
+                val cell = row.getChildAt(column) as TextView
+                assertEquals(text, cell.text.toString())
+                if (rowIndex == 0) assertTrue("Table headers must be bold", cell.typeface.isBold)
+            }
+        }
+
     }
 
     @Test

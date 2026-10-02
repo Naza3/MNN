@@ -663,4 +663,14 @@
     <string name="save_image">保存图片</string>
     <string name="image_saved_to_gallery">图片已保存到相册</string>
     <string name="failed_to_save_image">保存图片失败</string>
+
+    <!-- Complete translations required by the default resource set. -->
+    <string name="video_file_failed">无法获取视频文件</string>
+    <string name="scroll_to_bottom">滚动到底部</string>
+    <string name="use_https_url">客户端使用 HTTPS 地址</string>
+    <string name="not_downloaded">未下载</string>
+    <string name="download_state_cancelled">已取消</string>
+    <string name="download_state_preparing">准备中</string>
+    <string name="open_in_browser">在浏览器中打开</string>
+    <string name="menu_show_model_info_title">模型信息</string>
 </resources>

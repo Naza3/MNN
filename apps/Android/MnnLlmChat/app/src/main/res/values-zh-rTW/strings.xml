@@ -662,4 +662,14 @@
     <string name="save_image">儲存圖片</string>
     <string name="image_saved_to_gallery">圖片已儲存至相簿</string>
     <string name="failed_to_save_image">儲存圖片失敗</string>
+
+    <!-- Complete translations required by the default resource set. -->
+    <string name="video_file_failed">無法取得影片檔案</string>
+    <string name="scroll_to_bottom">捲動至底部</string>
+    <string name="use_https_url">用戶端使用 HTTPS 位址</string>
+    <string name="not_downloaded">尚未下載</string>
+    <string name="download_state_cancelled">已取消</string>
+    <string name="download_state_preparing">準備中</string>
+    <string name="open_in_browser">在瀏覽器中開啟</string>
+    <string name="menu_show_model_info_title">模型資訊</string>
 </resources>

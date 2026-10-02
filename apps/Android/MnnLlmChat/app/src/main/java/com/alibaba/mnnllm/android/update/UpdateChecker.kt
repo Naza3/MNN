@@ -334,18 +334,16 @@ class UpdateChecker(private val context: Context) {
         }
 
         fun registerDownloadReceiver(context: Context) {
-            // Do nothing in Google Play build
-            if (BuildConfig.IS_GOOGLE_PLAY_BUILD) {
+            // The fork does not use the upstream APK updater, including its completion receiver.
+            if (BuildConfig.IS_GOOGLE_PLAY_BUILD || BuildConfig.APPLICATION_ID.startsWith("io.github.naza3.mnnchat")) {
                 return
             }
-            
-            val downloadCompletedReceiver = DownloadReceiver()
             val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.registerReceiver(downloadCompletedReceiver, filter, Context.RECEIVER_EXPORTED)
-            } else {
-                context.registerReceiver(downloadCompletedReceiver, filter)
-            }
+            // DownloadManager sends a protected system broadcast; AndroidX supplies flags on all API levels.
+            androidx.core.content.ContextCompat.registerReceiver(
+                context, DownloadReceiver(), filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
         }
 
     }

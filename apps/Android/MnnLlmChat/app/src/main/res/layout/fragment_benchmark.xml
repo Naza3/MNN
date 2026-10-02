@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Modified by MNN Chat API contributors, 2026: use AndroidX image tint attributes. -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -412,7 +413,7 @@
                             android:layout_width="12dp"
                             android:layout_height="12dp"
                             android:src="@drawable/ic_repeat"
-                            android:tint="@color/benchmark_accent" />
+                            app:tint="@color/benchmark_accent" />
 
                         <TextView
                             android:id="@+id/test_iteration_info"

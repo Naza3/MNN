@@ -65,12 +65,19 @@ jobs:
       - name: Test audit helpers with synthetic fixtures
         id: helpers
         run: python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
-      - name: Verify pinned auxiliary Sherpa library
-        id: sherpa
-        run: python3 "$CI_TOOLS/prepare_prebuilt.py" --report-dir "$REPORT_DIR"
+      - name: Verify Gradle CI task registration before native compilation
+        id: gradle_init
+        run: |
+          bash "$CI_TOOLS/run_gradle.sh" --version > "$REPORT_DIR/gradle-version.txt"
+          python3 "$CI_TOOLS/verify_gradle_init.py" \
+            --wrapper "$RUNNER_TEMP/mnn-local-api-wrapper-$(id -u)/gradlew" \
+            --report-dir "$REPORT_DIR" --negative-control
       - name: Build current-source MNN arm64 engine
         id: native
         run: bash "$CI_TOOLS/build_native.sh"
+      - name: Build source-locked Sherpa ASR JNI and preserve dependency notices
+        id: sherpa
+        run: bash "$CI_TOOLS/build_sherpa.sh"
       - name: Run local API unit and Robolectric tests
         id: api_tests
         continue-on-error: true
@@ -79,23 +86,23 @@ jobs:
           bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest \
             --tests 'com.alibaba.mnnllm.api.openai.*'
       - name: Preserve focused test summary
-        if: always() && steps.native.outcome == 'success'
+        if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
         run: |
           python3 "$CI_TOOLS/collect_reports.py" --report-dir "$REPORT_DIR"
           cp "$REPORT_DIR/test-summary.json" "$REPORT_DIR/local-api-test-summary.json"
       - name: Run all App unit tests (upstream regressions remain visible)
         id: all_tests
-        if: always() && steps.native.outcome == 'success'
+        if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
         continue-on-error: true
         run: bash "$CI_TOOLS/run_gradle.sh" :app:testStandardDebugUnitTest
       - name: Lint standard release
         id: lint
-        if: always() && steps.native.outcome == 'success'
+        if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
         continue-on-error: true
         run: bash "$CI_TOOLS/run_gradle.sh" :app:lintStandardRelease
       - name: Assemble unsigned standard arm64 APK and dependency inventory
         id: assemble
-        if: always() && steps.native.outcome == 'success'
+        if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
         continue-on-error: true
         run: |
           bash "$CI_TOOLS/run_gradle.sh" :app:assembleStandardRelease :app:localApiDependencyInventory
@@ -122,7 +129,7 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib
           steps = json.loads(os.environ['STEP_RESULTS'])
-          expected = ['preflight', 'toolchain', 'helpers', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'reports']
+          expected = ['preflight', 'toolchain', 'helpers', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'reports']
           outcomes = {name: steps.get(name, {}).get('outcome', 'not_run') for name in expected}
           out = pathlib.Path(os.environ['REPORT_DIR'])
           out.mkdir(parents=True, exist_ok=True)

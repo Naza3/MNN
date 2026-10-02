@@ -17,10 +17,114 @@
     "wrapper_script_sha256": "a3648413b47ef77af21d5ebc36c687c7d103aaef3e17f33de7d4f080a6f300a3"
   },
   "sherpa": {
-    "url": "https://meta.alicdn.com/data/mnn/libs/libsherpa-mnn-jni-16k.zip",
-    "archive_sha256": "bbc77673fbd9d2daa7a262dedae26be2f56fc65e22dcf4bb04e37aa37c16c47d",
-    "member": "libsherpa-mnn-jni.so",
-    "source_provenance": "Upstream App auxiliary prebuilt; exact source revision and static dependency closure not supplied by archive"
+    "source_root": "apps/frameworks/sherpa-mnn",
+    "source_tree_sha": "2bb2ba10a44a77aaaf625dab10731bc20b0abbbd",
+    "source_version": "1.10.46",
+    "configuration": {
+      "jni": true,
+      "tts": false,
+      "speaker_diarization": false,
+      "binaries": false,
+      "c_api": false,
+      "websocket": false,
+      "portaudio": false,
+      "python": false,
+      "tests": false,
+      "static_dependencies": true,
+      "stl": "c++_shared",
+      "eigen_mpl2_only": true
+    },
+    "required_jni_exports": [
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_newFromAsset",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_newFromFile",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_delete",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_createStream",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_reset",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_decode",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_isEndpoint",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_isReady",
+      "Java_com_k2fsa_sherpa_mnn_OnlineRecognizer_getResult",
+      "Java_com_k2fsa_sherpa_mnn_OnlineStream_acceptWaveform",
+      "Java_com_k2fsa_sherpa_mnn_OnlineStream_inputFinished",
+      "Java_com_k2fsa_sherpa_mnn_OnlineStream_delete"
+    ],
+    "dependencies": [
+      {
+        "name": "kaldi_native_fbank",
+        "filename": "kaldi-native-fbank-1.21.1.tar.gz",
+        "cmake_file": "kaldi-native-fbank.cmake",
+        "url": "https://github.com/csukuangfj/kaldi-native-fbank/archive/refs/tags/v1.21.1.tar.gz",
+        "sha256": "37c1aa230b00fe062791d800d8fc50aa3de215918d3dce6440699e67275d859e",
+        "notices": [
+          "LICENSE",
+          "kaldi-native-fbank/csrc/fftsg.cc"
+        ]
+      },
+      {
+        "name": "kaldi_decoder",
+        "filename": "kaldi-decoder-0.2.6.tar.gz",
+        "cmake_file": "kaldi-decoder.cmake",
+        "url": "https://github.com/k2-fsa/kaldi-decoder/archive/refs/tags/v0.2.6.tar.gz",
+        "sha256": "b13c78b37495cafc6ef3f8a7b661b349c55a51abbd7f7f42f389408dcf86a463",
+        "notices": [
+          "LICENSE"
+        ]
+      },
+      {
+        "name": "kaldifst",
+        "filename": "kaldifst-1.7.11.tar.gz",
+        "cmake_file": "kaldifst.cmake",
+        "url": "https://github.com/k2-fsa/kaldifst/archive/refs/tags/v1.7.11.tar.gz",
+        "sha256": "b43b3332faa2961edc730e47995a58cd4e22ead21905d55b0c4a41375b4a525f",
+        "notices": [
+          "LICENSE"
+        ]
+      },
+      {
+        "name": "openfst",
+        "filename": "openfst-sherpa-onnx-2024-06-19.tar.gz",
+        "cmake_file": "openfst.cmake",
+        "url": "https://github.com/csukuangfj/openfst/archive/refs/tags/sherpa-onnx-2024-06-19.tar.gz",
+        "sha256": "5c98e82cc509c5618502dde4860b8ea04d843850ed57e6d6b590b644b268853d",
+        "notices": [
+          "COPYING",
+          "AUTHORS"
+        ]
+      },
+      {
+        "name": "simple-sentencepiece",
+        "filename": "simple-sentencepiece-0.7.tar.gz",
+        "cmake_file": "simple-sentencepiece.cmake",
+        "url": "https://github.com/pkufool/simple-sentencepiece/archive/refs/tags/v0.7.tar.gz",
+        "sha256": "1748a822060a35baa9f6609f84efc8eb54dc0e74b9ece3d82367b7119fdc75af",
+        "notices": [
+          "LICENSE",
+          "ssentencepiece/csrc/darts.h",
+          "ssentencepiece/csrc/threadpool.h"
+        ]
+      },
+      {
+        "name": "eigen",
+        "filename": "eigen-3.4.0.tar.gz",
+        "cmake_file": "eigen.cmake",
+        "url": "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz",
+        "sha256": "8586084f71f9bde545ee7fa6d00288b264a2b7ac3607b974e54d13e7162c1c72",
+        "notices": [
+          "COPYING.README",
+          "COPYING.MPL2",
+          "COPYING.BSD"
+        ]
+      }
+    ],
+    "required_static_archives": [
+      "libsherpa-mnn-core.a",
+      "libkaldi-native-fbank-core.a",
+      "libkaldi-decoder-core.a",
+      "libsherpa-mnn-kaldifst-core.a",
+      "libsherpa-mnn-fst.a",
+      "libsherpa-mnn-fstfar.a",
+      "libssentencepiece_core.a"
+    ]
   },
   "expected_apk": {
     "package": "io.github.naza3.mnnchat",

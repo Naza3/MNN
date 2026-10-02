@@ -1,14 +1,10 @@
-import hashlib
 import json
 from pathlib import Path
 import struct
-import tempfile
 import unittest
-import zipfile
 
 from audit_apk import (elf_load_segments, suspicious_entry, validate_manifest,
                        validate_extraction_rules, dynamic_symbols, extraction_reference_matches)
-from prepare_prebuilt import extract_verified
 
 LOCK = json.loads((Path(__file__).parent/'build-lock.json').read_text())
 
@@ -96,28 +92,6 @@ class AuditHelpersTest(unittest.TestCase):
         self.assertEqual('private key material',suspicious_entry('assets/config.txt',b'-----BEGIN PRIVATE KEY-----'))
         self.assertIsNone(suspicious_entry('assets/model_market.json',b'{"name":"model catalog"}'))
 
-    def test_verified_archive_extracts_only_expected_library(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary)
-            archive=root/'fixture.zip'
-            with zipfile.ZipFile(archive,'w') as zipped:
-                zipped.writestr('libsherpa-mnn-jni.so',elf_fixture())
-                zipped.writestr('../escape','must not extract')
-            lock={'archive_sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),
-                  'member':'libsherpa-mnn-jni.so','url':'https://example.invalid/fixture.zip','source_provenance':'synthetic'}
-            destination=root/'out/library.so'
-            extract_verified(archive,lock,destination)
-            self.assertEqual(elf_fixture(),destination.read_bytes())
-            self.assertFalse((root/'escape').exists())
-
-    def test_hash_mismatch_does_not_write_library(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary)
-            archive=root/'fixture.zip'
-            archive.write_bytes(b'not approved')
-            with self.assertRaises(RuntimeError):
-                extract_verified(archive,{'archive_sha256':'0'*64},root/'library.so')
-            self.assertFalse((root/'library.so').exists())
 
 
 if __name__=='__main__': unittest.main()

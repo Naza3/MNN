@@ -147,6 +147,15 @@ def dynamic_symbols(text):
     return defined, required
 
 
+def validate_sherpa_provenance(record, lock, library_sha, mnn_sha, inputs_sha):
+    expected = {"source_kind": "built_from_locked_source", "library_sha256": library_sha,
+                "mnn_library_sha256": mnn_sha, "engine_base_sha": lock["engine_base_sha"],
+                "source_root": lock["sherpa"]["source_root"],
+                "source_tree_sha": lock["sherpa"]["source_tree_sha"],
+                "source_inputs_report_sha256": inputs_sha}
+    return [f"Sherpa provenance mismatch: {key}" for key, value in expected.items() if record.get(key) != value]
+
+
 def command(*args):
     return subprocess.check_output(args, text=True, stderr=subprocess.STDOUT)
 
@@ -162,7 +171,7 @@ def main():
     report = {"apk_filename": args.apk.name, "apk_sha256": hashlib.sha256(args.apk.read_bytes()).hexdigest(),
               "apk_size": args.apk.stat().st_size, "native_libraries": [], "errors": [],
               "runtime_validation": "not_run: requires a real arm64 Android device and a user-selected model",
-              "license_closure": "review_required: see NOTICE-AUDIT.md and dependency-inventory.json"}
+              "license_closure": "source_and_notice_evidence: see NOTICE-AUDIT.md, sherpa-source-inputs.json and dependency-inventory.json"}
     errors = report["errors"]
     source_mnn = HERE.parents[4] / "project/android/build_64/lib/libMNN.so"
     source_sherpa = HERE.parents[1] / "app/src/main/jniLibs/arm64-v8a/libsherpa-mnn-jni.so"
@@ -235,6 +244,17 @@ def main():
                     "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
                     "zip_compression": entry.compress_type, "build_id": build_ids, "load_segments": segments,
                     "needed": needed, "unresolved": missing})
+            sherpa_exports = packaged_symbols.get("libsherpa-mnn-jni.so", (set(), set()))[0]
+            missing_jni = sorted(set(lock["sherpa"]["required_jni_exports"]) - sherpa_exports)
+            if missing_jni:
+                errors.append("Missing App ASR JNI exports: " + ", ".join(missing_jni))
+            report["sherpa_jni_exports"] = "failed" if missing_jni else "passed"
+            provenance_path = args.report_dir / "sherpa-provenance.json"
+            provenance = json.loads(provenance_path.read_text())
+            errors.extend(validate_sherpa_provenance(provenance, lock,
+                hashlib.sha256(source_sherpa.read_bytes()).hexdigest(),
+                hashlib.sha256(source_mnn.read_bytes()).hexdigest(),
+                hashlib.sha256((args.report_dir / "sherpa-source-inputs.json").read_bytes()).hexdigest()))
             mnn_exports = packaged_symbols.get("libMNN.so", (set(), set()))[0]
             for name, (_, required) in packaged_symbols.items():
                 missing = sorted(required - mnn_exports)

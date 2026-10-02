@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: verify Chinese locale handling across regions.
 package com.alibaba.mnnllm.android.utils
 
 import android.content.Context
@@ -14,8 +15,7 @@ import java.util.Locale
 /**
  * TDD tests for DeviceUtils.isChinese locale detection.
  * 
- * Current behavior: only zh_CN returns true
- * Expected behavior: all Chinese locales (zh_CN, zh_TW, zh_HK, zh_SG, zh) should return true
+ * Supported behavior: all Chinese locales (zh_CN, zh_TW, zh_HK, zh_SG, zh) should return true
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -28,7 +28,7 @@ class DeviceUtilsTest {
         return context.createConfigurationContext(config)
     }
 
-    // ==================== 当前行为测试（应该通过） ====================
+    // Chinese and non-Chinese language coverage.
 
     @Test
     fun `isChinese should return true for zh_CN locale`() {
@@ -42,7 +42,7 @@ class DeviceUtilsTest {
         assertFalse("en_US should not be Chinese", DeviceUtils.isChinese(context))
     }
 
-    // ==================== 预期行为测试（当前会失败，修复后应通过） ====================
+    // Country and script must not prevent Chinese-language detection.
 
     @Test
     fun `isChinese should return true for zh_TW locale`() {

@@ -1,34 +1,61 @@
-# Dependency and redistribution audit
+# Source, dependency, and redistribution evidence
 
-This is a test-build evidence bundle, not a statement of complete license
-clearance. A successful compile, ELF/ZIP alignment check, or Maven POM does not
-prove all redistribution obligations have been met.
+The build uses recorded source inputs and preserves notices. A successful
+compile or Maven license declaration is not a legal opinion or proof of every
+possible downstream distribution obligation.
 
-- `dependency-inventory.json` lists the actual resolved release-runtime
-  artifacts and SHA-256 digests. Available POM license declarations are evidence,
-  not a substitute for reviewing transitive or embedded components.
-- `notices/` and `notice-inventory.json` preserve available source notices and
-  notices embedded in resolved AAR/JAR artifacts. Upstream Android packaging
-  excludes some META-INF license files; this companion bundle preserves notices
-  it can find. Any eventual redistribution must include the required notices.
-- Primary `libMNN.so`, App JNI, and `libmnn_tts.so` are compiled from the frozen
-  source checkout. `apk-audit.json` describes libraries actually in the APK,
-  their hashes, ELF page alignment, and dynamic dependencies.
-- Upstream's auxiliary `libsherpa-mnn-jni.so` is pinned by archive and ELF hash.
-  The CDN archive has no source commit, build recipe, license text, or static
-  dependency manifest. The repository's Sherpa LICENSE/NOTICE are included for
-  context, but are not proof that this particular binary has the same complete
-  dependency closure. Exact binary provenance and static-dependency notices
-  remain an explicit redistribution blocker until independently established or
-  the auxiliary library is rebuilt from audited, pinned sources.
-- Header-only libraries may carry notices inside source headers. Included
-  header excerpts are evidence for review; this collector does not claim to
-  identify every compiled third-party component or produce a legal opinion.
-- Firebase plugins and runtime collection are disabled by configuration, but
-  upstream still declares Firebase runtime dependencies. Inspect the inventory
-  and merged manifest; do not assume those components are absent from the APK.
-- QNN is disabled. No proprietary QNN SDK/library, model weights, model license,
-  user API key, signing key, or user conversation is supplied by this workflow.
+## Native libraries
 
-Do not label this bundle "redistribution-ready" until the remaining native,
-header-only, and JVM transitive notice obligations have been reviewed and met.
+Primary `libMNN.so`, App JNI, `libmnn_tts.so`, and the auxiliary
+`libsherpa-mnn-jni.so` are built from the locked MNN repository. There is no
+opaque Sherpa binary download or old-engine fallback. `apk-audit.json` records
+what is actually packaged: native hashes, source/build identities, required JNI
+exports, ELF/ZIP alignment, and dynamic/MNN-symbol dependency checks.
+
+Sherpa's exact repository tree, configuration, linked static archive hashes,
+MNN input hash, and JNI output hash are in `sherpa-provenance.json`. Its six
+source dependency archives and SHA-256 values are in
+`sherpa-source-inputs.json`. The exact original archives are supplied in
+`sherpa-sources/`, including Eigen's source; preserve this source bundle or an
+equivalent compliant source-availability mechanism when redistributing the APK.
+The original OpenFST build-script patch is applied by the locked upstream
+FetchContent recipe and identified in the report; the original archive remains
+unchanged in the source bundle.
+
+The required source notices are copied without paraphrase to
+`sherpa-notices/`. They include:
+
+- Sherpa LICENSE/NOTICE in the general `notices/` collection, preserving the
+  Xiaomi/MNN attribution and sherpa-onnx derivation
+- Apache-2.0 licenses for kaldi-native-fbank, kaldi-decoder, kaldifst, and
+  simple-sentencepiece; OpenFST COPYING and AUTHORS
+- Complete license-bearing source files for Ooura FFT (`fftsg.cc`), Darts
+  (`darts.h`, BSD-2-Clause), and ThreadPool (`threadpool.h`, zlib-style)
+- Eigen COPYING.README, COPYING.MPL2, and COPYING.BSD; compilation enforces
+  `EIGEN_MPL2_ONLY` and the exact Eigen source archive accompanies the bundle
+
+The selected Sherpa build includes the ASR functions MnnLlmChat uses. Unused
+Sherpa TTS/speaker-diarization and demo/network/Python/test features are off,
+so their optional dependencies (including eSpeak) are not fetched or linked.
+The App's separate `mnn_tts` module and its existing enabled TTS features remain
+unchanged. Final device ASR/TTS behavior must still be tested with the real
+user-selected models; symbol checks do not substitute for inference.
+
+## JVM and remaining source notices
+
+`dependency-inventory.json` lists the actual resolved release-runtime artifacts
+and hashes, with available POM license declarations. `notices/` and
+`notice-inventory.json` preserve available source notices and notices embedded
+in AAR/JAR artifacts. Upstream packaging excludes some META-INF license files;
+the companion bundle preserves notices it can find. Include applicable notices
+with any redistribution, and review transitive/embedded requirements rather
+than treating a POM as complete clearance.
+
+Header-only libraries can carry additional notices in source headers. The
+collector includes available relevant header evidence; it does not claim a
+comprehensive legal assessment of all native/JVM code. Firebase plugins and
+collection are disabled, but upstream still declares Firebase dependencies;
+inspect the actual inventory and merged manifest before describing them.
+
+QNN is off. No proprietary QNN asset, model weights, model license, user API
+key, signing key, or user conversation is supplied by this workflow.

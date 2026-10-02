@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: recognize Chinese by language across regions.
 // Created by ruoyi.sjd on 2025/2/10.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 package com.alibaba.mnnllm.android.utils
@@ -16,7 +17,7 @@ SdkInt:${Build.VERSION.SDK_INT}""")
         get() = isChinese(ApplicationProvider.get())
 
     /**
-     * Check if the given context's configuration indicates Chinese locale (zh_CN).
+     * Check if the given context's configuration indicates a Chinese-language locale in any region.
      * Use this for ViewHolder/UI bind to ensure correct locale at bind time.
      */
     @JvmStatic
@@ -28,6 +29,6 @@ SdkInt:${Build.VERSION.SDK_INT}""")
             @Suppress("DEPRECATION")
             config.locale
         } ?: return false
-        return locale.language == "zh" && locale.country == "CN"
+        return locale.language.equals("zh", ignoreCase = true)
     }
 }

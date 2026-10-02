@@ -4,12 +4,36 @@ import java.security.MessageDigest
 
 def reportDirectory = System.getenv('REPORT_DIR')
 if (!reportDirectory) throw new GradleException('REPORT_DIR is required')
-gradle.projectsEvaluated {
-    def app = gradle.rootProject.project(':app')
+// Register before each project's build script is evaluated. projectsEvaluated
+// runs too late for explicit task selection with configuration-on-demand.
+gradle.beforeProject { app ->
+    if (app.path != ':app') return
+    def verifySherpa = app.tasks.register('verifySourceBuiltSherpa') {
+        doLast {
+            def provenance = new File(reportDirectory, 'sherpa-provenance.json')
+            def library = app.file('src/main/jniLibs/arm64-v8a/libsherpa-mnn-jni.so')
+            if (!provenance.isFile() || !library.isFile()) throw new GradleException('Build Sherpa from pinned source before Gradle')
+            def record = new groovy.json.JsonSlurper().parse(provenance)
+            def digest = MessageDigest.getInstance('SHA-256').digest(library.bytes).encodeHex().toString()
+            def lock = new groovy.json.JsonSlurper().parse(app.rootProject.file('tools/local_api_ci/build-lock.json'))
+            def mnn = app.rootProject.file('../../../project/android/build_64/lib/libMNN.so')
+            def inputs = new File(reportDirectory, 'sherpa-source-inputs.json')
+            if (!mnn.isFile() || !inputs.isFile()) throw new GradleException('Current MNN/source input evidence is missing')
+            def mnnHash = MessageDigest.getInstance('SHA-256').digest(mnn.bytes).encodeHex().toString()
+            def inputsHash = MessageDigest.getInstance('SHA-256').digest(inputs.bytes).encodeHex().toString()
+            if (record.source_kind != 'built_from_locked_source' || digest != record.library_sha256 ||
+                    record.engine_base_sha != lock.engine_base_sha || record.source_tree_sha != lock.sherpa.source_tree_sha ||
+                    record.source_root != lock.sherpa.source_root || record.mnn_library_sha256 != mnnHash ||
+                    record.source_inputs_report_sha256 != inputsHash) {
+                throw new GradleException('Sherpa library does not match the recorded source build')
+            }
+        }
+    }
+    app.tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn verifySherpa }
     app.tasks.matching { it.name == 'downloadAndUnzipNativeLibs' }.configureEach {
         doFirst {
             def library = app.file('src/main/jniLibs/arm64-v8a/libsherpa-mnn-jni.so')
-            if (!library.exists()) throw new GradleException('Pinned Sherpa preparation is missing; unverified CDN download is forbidden')
+            if (!library.exists()) throw new GradleException('Source-built Sherpa preparation is missing; binary CDN download is forbidden')
         }
     }
     app.tasks.matching { it.name in ['downloadAndUnzipBuiltinModels', 'copyModelInfoToMarketConfig'] }.configureEach {
