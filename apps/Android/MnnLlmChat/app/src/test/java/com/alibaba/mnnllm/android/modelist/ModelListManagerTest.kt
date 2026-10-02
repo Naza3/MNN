@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: synchronize real-IO market tests.
 package com.alibaba.mnnllm.android.modelist
 
 import android.content.Context
@@ -17,9 +18,19 @@ import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.unmockkAll
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.FlowCollector
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -44,6 +55,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowBuild
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], manifest = Config.NONE)
@@ -100,6 +112,14 @@ class ModelListManagerTest {
             val instance = ModelListManager
             val kClass = instance::class
 
+            // The singleton's init block also launches an application-scope job.
+            // Drain it before clearing flags, or it can reinitialize this test's state.
+            val scopeField = kClass.java.getDeclaredField("applicationScope")
+            scopeField.isAccessible = true
+            val scope = scopeField.get(instance) as CoroutineScope
+            runBlocking {
+                scope.coroutineContext[Job]?.children?.toList()?.forEach { it.cancelAndJoin() }
+            }
             cancelJobField("marketDataSyncJob")
             cancelJobField("tagWarmupJob")
 
@@ -159,10 +179,12 @@ class ModelListManagerTest {
 
     @After
     fun tearDown() {
+        // Stop the real IO collectors while their dependencies are still mocked.
+        // Otherwise a previous test can resume against unmocked singletons.
+        resetModelListManager()
+        ModelListManager.clearModelCache()
         unmockkAll()
         Dispatchers.resetMain()
-        ModelListManager.clearModelCache()
-        resetModelListManager() // Reset again to be safe
         
         if (::tempDir.isInitialized && tempDir.exists()) {
             tempDir.deleteRecursively()
@@ -1917,8 +1939,11 @@ class ModelListManagerTest {
         assertTrue("Model map should not be empty", modelMap.isNotEmpty())
     }
 
+    // These integration cases observe a collector owned by Dispatchers.IO. runTest's
+    // virtual delay/timeout would race ahead without allowing that real worker to run.
     @Test
-    fun `market update during initialization should still refresh when same version re-emits`() = runTest {
+    @OptIn(kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi::class)
+    fun `market update during initialization should still refresh when same version re-emits`() = runBlocking {
         val originalFingerprint = android.os.Build.FINGERPRINT
         ShadowBuild.setFingerprint("physical-device-for-market-sync")
         try {
@@ -1947,37 +1972,51 @@ class ModelListManagerTest {
                 modelId = "HuggingFace/taobao-mnn/Qwen3.5-0.8B-MNN"
             )
             val marketItemV2 = marketItemV1.copy(tags = listOf("Think", "Vision"))
-            var currentMarketItems = mapOf(marketItemV1.modelId to marketItemV1)
-            every { ModelMarketCache.getAllCachedModels() } answers { currentMarketItems }
+            val currentMarketItems = AtomicReference(mapOf(marketItemV1.modelId to marketItemV1))
+            every { ModelMarketCache.getAllCachedModels() } answers { currentMarketItems.get() }
 
-            setMarketDataFlowForTest(null)
-            val initializeJob = launch { ModelListManager.initialize(context) }
-
-            withTimeout(5000) {
-                while (!isModelListManagerInitializing() || !isMarketSyncJobStarted()) {
-                    delay(10)
+            val initializationEntered = CompletableDeferred<Unit>()
+            val finishInitialization = CompletableDeferred<Unit>()
+            every { ModelMarketCache.observeModelMarketConfig(any()) } returns flow {
+                initializationEntered.complete(Unit)
+                finishInitialization.await()
+                emit(emptyMap())
+            }
+            val firstMarketData = createMarketData(version = "42", nonce = "first")
+            val firstEmissionHandled = CompletableDeferred<Unit>()
+            val marketData = MutableStateFlow<ModelMarketConfig?>(null)
+            mockkObject(ModelRepository)
+            every { ModelRepository.marketDataFlow } returns object : StateFlow<ModelMarketConfig?> by marketData {
+                override suspend fun collect(collector: FlowCollector<ModelMarketConfig?>): Nothing {
+                    marketData.collect(FlowCollector { value ->
+                        collector.emit(value)
+                        // Acknowledge after the production collector handled (and ignored)
+                        // this emission, while initialization is deterministically held.
+                        if (value === firstMarketData) firstEmissionHandled.complete(Unit)
+                    })
                 }
             }
-
-            val firstMarketData = createMarketData(version = "42", nonce = "first")
-            setMarketDataFlowForTest(firstMarketData)
+            val initializeJob = launch { ModelListManager.initialize(context) }
+            try {
+                withTimeout(5000) { initializationEntered.await() }
+                assertTrue(isModelListManagerInitializing())
+                assertTrue(isMarketSyncJobStarted())
+                marketData.value = firstMarketData
+                withTimeout(3000) { firstEmissionHandled.await() }
+                assertNull("An update during initialization must not be marked synced", getLastSyncedMarketDataKey())
+            } finally {
+                finishInitialization.complete(Unit)
+            }
             initializeJob.join()
 
             val firstTags = ModelListManager.getModelTags(modelId)
             assertTrue("Initial tags should include Think, tags=$firstTags", firstTags.contains("Think"))
             assertFalse("Initial tags should not include Vision yet, tags=$firstTags", firstTags.contains("Vision"))
 
-            currentMarketItems = mapOf(marketItemV2.modelId to marketItemV2)
+            currentMarketItems.set(mapOf(marketItemV2.modelId to marketItemV2))
             val secondMarketDataSameVersion = createMarketData(version = "42", nonce = "second")
-            setMarketDataFlowForTest(secondMarketDataSameVersion)
-
-            var refreshedTags = ModelListManager.getModelTags(modelId)
-            withTimeout(3000) {
-                while (!refreshedTags.contains("Vision")) {
-                    delay(50)
-                    refreshedTags = ModelListManager.getModelTags(modelId)
-                }
-            }
+            publishMarketDataAndAwaitRefresh(secondMarketDataSameVersion) { marketData.value = it }
+            val refreshedTags = ModelListManager.getModelTags(modelId)
             assertTrue(
                 "Expected Vision tag after same-version re-emit, actual tags=$refreshedTags",
                 refreshedTags.contains("Vision")
@@ -1989,14 +2028,14 @@ class ModelListManagerTest {
     }
 
     @Test
-    fun `market update with same version should refresh when environment changes`() = runTest {
+    fun `market update with same version should refresh when environment changes`() = runBlocking {
         val originalFingerprint = android.os.Build.FINGERPRINT
         ShadowBuild.setFingerprint("physical-device-for-market-sync")
         try {
-            var currentEnv = "prod"
+            val currentEnv = AtomicReference("prod")
             every {
                 PreferenceUtils.getString(any(), "debug_market_data_environment", any())
-            } answers { currentEnv }
+            } answers { currentEnv.get() }
 
             val modelId = "ModelScope/MNN/Qwen3.5-0.8B-MNN"
             val localModel = ModelItem().apply {
@@ -2016,8 +2055,8 @@ class ModelListManagerTest {
                 modelId = "HuggingFace/taobao-mnn/Qwen3.5-0.8B-MNN"
             )
             val marketItemV2 = marketItemV1.copy(tags = listOf("Think", "Vision"))
-            var currentMarketItems = mapOf(marketItemV1.modelId to marketItemV1)
-            every { ModelMarketCache.getAllCachedModels() } answers { currentMarketItems }
+            val currentMarketItems = AtomicReference(mapOf(marketItemV1.modelId to marketItemV1))
+            every { ModelMarketCache.getAllCachedModels() } answers { currentMarketItems.get() }
 
             setMarketDataFlowForTest(null)
             ModelListManager.initialize(context)
@@ -2028,24 +2067,18 @@ class ModelListManagerTest {
                 }
             }
 
-            setMarketDataFlowForTest(createMarketData(version = "42", nonce = "prod"))
-            withTimeout(3000) {
-                while (getLastSyncedMarketDataKey() != "prod:42") {
-                    delay(50)
-                }
-            }
+            publishMarketDataAndAwaitRefresh(createMarketData(version = "42", nonce = "prod"))
+            assertEquals("prod:42", getLastSyncedMarketDataKey())
+            val initialTags = ModelListManager.getModelTags(modelId)
+            assertTrue("Prod refresh should retain Think, tags=$initialTags", initialTags.contains("Think"))
+            assertFalse("Prod refresh should not include Vision, tags=$initialTags", initialTags.contains("Vision"))
 
-            currentEnv = "dev"
-            currentMarketItems = mapOf(marketItemV2.modelId to marketItemV2)
-            setMarketDataFlowForTest(createMarketData(version = "42", nonce = "dev"))
-
-            var refreshedTags = ModelListManager.getModelTags(modelId)
-            withTimeout(3000) {
-                while (!refreshedTags.contains("Vision")) {
-                    delay(50)
-                    refreshedTags = ModelListManager.getModelTags(modelId)
-                }
-            }
+            currentEnv.set("dev")
+            currentMarketItems.set(mapOf(marketItemV2.modelId to marketItemV2))
+            publishMarketDataAndAwaitRefresh(createMarketData(version = "42", nonce = "dev"))
+            assertEquals("dev:42", getLastSyncedMarketDataKey())
+            val refreshedTags = ModelListManager.getModelTags(modelId)
+            assertTrue("Dev refresh should retain Think, tags=$refreshedTags", refreshedTags.contains("Think"))
             assertTrue(
                 "Expected Vision tag after env switch with same version, actual tags=$refreshedTags",
                 refreshedTags.contains("Vision")
@@ -2054,6 +2087,23 @@ class ModelListManagerTest {
             ShadowBuild.reset()
             ShadowBuild.setFingerprint(originalFingerprint)
         }
+    }
+
+    private suspend fun publishMarketDataAndAwaitRefresh(
+        value: ModelMarketConfig,
+        publish: (ModelMarketConfig) -> Unit = { setMarketDataFlowForTest(it) }
+    ) = coroutineScope {
+        // refreshEvents has no replay. Subscribe before publishing and wait for the
+        // completed refresh, not lastSyncedMarketDataKey (which is written at entry).
+        val refresh = async(start = CoroutineStart.UNDISPATCHED) {
+            withTimeout(3000) { ModelListManager.refreshEvents.first() }
+        }
+        publish(value)
+        val result = refresh.await()
+        assertTrue(
+            "Expected a completed market refresh, got $result",
+            result is ModelListManager.RefreshEvent.Success || result is ModelListManager.RefreshEvent.NoChange
+        )
     }
 
     private fun isModelListManagerInitializing(): Boolean {
