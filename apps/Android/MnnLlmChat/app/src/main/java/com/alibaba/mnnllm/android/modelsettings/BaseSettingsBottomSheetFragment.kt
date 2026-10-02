@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: settings callbacks belong to their UI attachment.
 // Created by ruoyi.sjd on 2025/4/29.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 
@@ -137,13 +138,46 @@ abstract class BaseSettingsBottomSheetFragment : BaseBottomSheetDialogFragment()
      * Reset settings to defaults. Deletes custom_config.json so base config.json is used,
      * then reloads. Ensures default system prompt and other defaults are restored.
      */
+    private var runtimeSession: com.alibaba.mnnllm.android.llm.ChatSession? = null
+    private var runtimeEpoch: Long? = null
+
+    fun setRuntimeAttachment(session: com.alibaba.mnnllm.android.llm.ChatSession?, epoch: Long?) {
+        runtimeSession = session
+        runtimeEpoch = epoch
+        if (!isAdded) arguments = (arguments ?: Bundle()).apply { putBoolean("requires_runtime_attachment", session != null) }
+    }
+
+    protected fun isRuntimeAttachmentCurrent(): Boolean = (runtimeSession == null &&
+        arguments?.getBoolean("requires_runtime_attachment", false) != true) ||
+        com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController()
+            .isChatAttachmentCurrent(runtimeSession, runtimeEpoch)
+
+    protected fun runForRuntimeAttachment(action: () -> Unit): Boolean {
+        val session = runtimeSession
+        if (session == null) {
+            if (!isRuntimeAttachmentCurrent()) return false
+            action(); return true
+        }
+        val controller = com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController()
+        if (!controller.isChatAttachmentCurrent(session, runtimeEpoch)) return false
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            val applied = controller.tryWithChatAttachment(session, runtimeEpoch, action)
+            if (!applied && isAdded) android.widget.Toast.makeText(requireContext(),
+                com.alibaba.mnnllm.android.R.string.model_settings_busy, android.widget.Toast.LENGTH_LONG).show()
+            return applied
+        }
+        return try { controller.withChatAttachment(session, runtimeEpoch, action); true }
+        catch (_: IllegalStateException) { false }
+    }
+
     protected open fun resetSettingsToDefaults() {
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) {
-                ModelConfig.deleteExtraConfig(_modelId)
+            val applied = withContext(Dispatchers.IO) {
+                runForRuntimeAttachment { ModelConfig.deleteExtraConfig(_modelId) }
             }
+            if (!applied || !isRuntimeAttachmentCurrent()) return@launch
             loadSettingsAsync()
-            onAfterSettingsReset()
+            if (isRuntimeAttachmentCurrent()) onAfterSettingsReset()
         }
     }
 

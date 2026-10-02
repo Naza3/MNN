@@ -13,6 +13,7 @@ import zipfile
 
 from pem_scan import private_key_markers, credential_like_token
 from public_fixture import validate_fixture_proof
+from engine_source import verified_engine_paths, verify_app_native_roots
 
 HERE = Path(__file__).resolve().parent
 ANDROID = "{http://schemas.android.com/apk/res/android}"
@@ -278,18 +279,25 @@ def main():
               "runtime_validation": "not_run: requires a real arm64 Android device and a user-selected model",
               "license_closure": "source_and_notice_evidence: see NOTICE-AUDIT.md, sherpa-source-inputs.json and dependency-inventory.json"}
     errors = report["errors"]
-    source_mnn = HERE.parents[4] / "project/android/build_64/lib/libMNN.so"
+    source_mnn = None
     source_sherpa = HERE.parents[1] / "app/src/main/jniLibs/arm64-v8a/libsherpa-mnn-jni.so"
     args.report_dir.mkdir(parents=True, exist_ok=True)
     apkanalyzer = args.sdk / "cmdline-tools/latest/bin/apkanalyzer"
     build_tools = args.sdk / "build-tools" / tc["build_tools"]
     readelf = args.sdk / "ndk" / tc["ndk"] / "toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
     try:
+        engine_root, engine_install = verified_engine_paths(args.report_dir)
+        source_mnn = engine_install / "lib/libMNN.so"
         try:
             errors.extend(audit_compiled_manifest(args.apk, apkanalyzer, build_tools / "aapt2",
                                                  args.report_dir, expected, report))
         except (OSError, ValueError, ET.ParseError, zipfile.BadZipFile) as error:
             # Keep auditing independent native/signature properties for diagnosis.
+            errors.append(str(error))
+        try:
+            report["native_build_roots"] = verify_app_native_roots(engine_root, engine_install)
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            report["native_build_roots_error"] = str(error)
             errors.append(str(error))
         alignment = command(str(build_tools / "zipalign"), "-c", "-P", "16", "-v", "4", str(args.apk))
         (args.report_dir / "zipalign.txt").write_text(alignment)
@@ -369,7 +377,7 @@ def main():
                     errors.append(f"Unresolved MNN ABI symbols in {name}: {', '.join(missing)}")
             report["mnn_symbol_compatibility"] = "failed" if any("Unresolved MNN ABI" in error for error in errors) else "passed"
         report["static_package_audit"] = "failed" if errors else "passed"
-    except (OSError, ValueError, ET.ParseError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
+    except (OSError, RuntimeError, ValueError, ET.ParseError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         errors.append(str(error))
         report["static_package_audit"] = "failed"
     finally:

@@ -10,6 +10,8 @@ import subprocess
 import tarfile
 import tempfile
 
+from engine_source import verified_engine_paths
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[4]
 
@@ -91,7 +93,8 @@ def main():
     args = parser.parse_args()
     config = json.loads((HERE / 'build-lock.json').read_text())
     lock = config['sherpa']
-    source_root = validate_source_lock(lock, ROOT)
+    engine_root, _ = verified_engine_paths(args.report_dir)
+    source_root = validate_source_lock(lock, engine_root)
     args.build_dir.mkdir(parents=True, exist_ok=True)
     args.report_dir.mkdir(parents=True, exist_ok=True)
     report = {'engine_base_sha': config['engine_base_sha'], 'source_root': lock['source_root'],

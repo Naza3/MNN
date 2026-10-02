@@ -47,9 +47,31 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE GIT_COMMIT_ID="${GIT_CO
 target_link_options(${CMAKE_PROJECT_NAME} PRIVATE "-Wl,-z,max-page-size=16384")
 
 #mnn
-set (MNN_SOURCE_ROOT "${CMAKE_SOURCE_DIR}/../../../../../../../")
+# CI supplies an independent, pinned official-release source checkout.
+# Keep the upstream relative-root default for ordinary developer builds.
+if(NOT DEFINED MNN_ENGINE_SOURCE_ROOT AND DEFINED ENV{MNN_ENGINE_SOURCE_ROOT})
+    set(MNN_ENGINE_SOURCE_ROOT "$ENV{MNN_ENGINE_SOURCE_ROOT}")
+endif()
+if(DEFINED MNN_ENGINE_SOURCE_ROOT)
+    set(MNN_SOURCE_ROOT "${MNN_ENGINE_SOURCE_ROOT}")
+    if(NOT IS_ABSOLUTE "${MNN_SOURCE_ROOT}" OR NOT EXISTS "${MNN_SOURCE_ROOT}/include/MNN/Interpreter.hpp")
+        message(FATAL_ERROR "MNN_ENGINE_SOURCE_ROOT must be an absolute engine source checkout")
+    endif()
+else()
+    set (MNN_SOURCE_ROOT "${CMAKE_SOURCE_DIR}/../../../../../../../")
+endif()
 #set (MNN_SOURCE_ROOT "/Users/songjinde/git/DAI/AliNNPrivate")
-set (MNN_INSTALL_ROOT "${MNN_SOURCE_ROOT}/project/android/build_64")
+if(NOT DEFINED MNN_ENGINE_INSTALL_ROOT AND DEFINED ENV{MNN_ENGINE_INSTALL_ROOT})
+    set(MNN_ENGINE_INSTALL_ROOT "$ENV{MNN_ENGINE_INSTALL_ROOT}")
+endif()
+if(DEFINED MNN_ENGINE_INSTALL_ROOT)
+    set(MNN_INSTALL_ROOT "${MNN_ENGINE_INSTALL_ROOT}")
+    if(NOT IS_ABSOLUTE "${MNN_INSTALL_ROOT}")
+        message(FATAL_ERROR "MNN_ENGINE_INSTALL_ROOT must be absolute")
+    endif()
+else()
+    set(MNN_INSTALL_ROOT "${MNN_SOURCE_ROOT}/project/android/build_64")
+endif()
 set(LIB_PATH "${MNN_INSTALL_ROOT}/lib")
 # set (MNN_INSTALL_ROOT "/Users/songjinde/MNN/project/android/build_64")
 

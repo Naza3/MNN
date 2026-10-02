@@ -9,10 +9,12 @@ mkdir -p "$REPORT_DIR"
 read_lock() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["toolchain"][sys.argv[2]])' "$HERE/build-lock.json" "$1"; }
 export ANDROID_NDK="$ANDROID_SDK_ROOT/ndk/$(read_lock ndk)"
 CMAKE="$ANDROID_SDK_ROOT/cmake/$(read_lock cmake)/bin/cmake"
-BUILD="$ROOT/project/android/build_64"
+python3 "$HERE/engine_source.py" --report-dir "$REPORT_DIR"
+SOURCE="$MNN_ENGINE_SOURCE_ROOT"
+BUILD="$MNN_ENGINE_INSTALL_ROOT"
 [[ -x "$CMAKE" && -f "$ANDROID_NDK/build/cmake/android.toolchain.cmake" ]]
 [[ ! -e "$BUILD/CMakeCache.txt" ]] || { echo 'Refusing to reuse an unverified native build cache' >&2; exit 1; }
-"$CMAKE" -S "$ROOT" -B "$BUILD" \
+"$CMAKE" -S "$SOURCE" -B "$BUILD" \
   -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
   -DCMAKE_BUILD_TYPE=Release -DANDROID_ABI=arm64-v8a \
   -DANDROID_STL=c++_static -DANDROID_NATIVE_API_LEVEL=android-21 \
@@ -21,7 +23,7 @@ BUILD="$ROOT/project/android/build_64"
   -DMNN_BUILD_TEST=OFF -DMNN_BUILD_BENCHMARK=OFF -DMNN_USE_SSE=OFF \
   -DMNN_LOW_MEMORY=ON \
   -DMNN_BUILD_LLM=ON -DMNN_SUPPORT_TRANSFORMER_FUSE=ON \
-  -DMNN_ARM82=ON -DMNN_USE_LOGCAT=ON -DMNN_OPENCL=ON \
+  -DMNN_ARM82=ON -DMNN_USE_LOGCAT=ON -DMNN_OPENCL=ON -DMNN_KLEIDIAI=OFF \
   -DMNN_BUILD_OPENCV=ON -DMNN_IMGCODECS=ON \
   -DMNN_BUILD_AUDIO=ON -DMNN_BUILD_DIFFUSION=ON \
   -DMNN_SEP_BUILD=OFF -DMNN_QNN=OFF \

@@ -6,8 +6,13 @@ possible downstream distribution obligation.
 
 ## Native libraries
 
-Primary `libMNN.so`, App JNI, `libmnn_tts.so`, and the auxiliary
-`libsherpa-mnn-jni.so` are built from the locked MNN repository. There is no
+Primary `libMNN.so` and auxiliary `libsherpa-mnn-jni.so` are built from the
+independent, pinned official stable Release checkout (3.6.1 at
+`d407447ed56c4121a11ccbd266dc184ca1ead0c2`). App JNI and `libmnn_tts.so` are
+built from the separately recorded App feature commit using that Release's
+headers and installed library. Actual AGP caches/compile commands verify the
+same source/install roots. Engine notices come from the actual Release source;
+App framework header notices retain their App-source attribution. There is no
 opaque Sherpa binary download or old-engine fallback. `apk-audit.json` records
 what is actually packaged: native hashes, source/build identities, required JNI
 exports, ELF/ZIP alignment, and dynamic/MNN-symbol dependency checks.

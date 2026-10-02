@@ -19,8 +19,20 @@ class SanaSession(
     override var supportOmni: Boolean = false
     override val debugInfo: String = ""
 
-    private var nativePtr: Long = 0
+    @Volatile private var nativePtr: Long = 0
     private var releaseFailed = false
+    private val generationCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+    override fun isModelLoaded(): Boolean = nativePtr != 0L
+    override fun cancelGeneration() { generationCancelled.set(true) }
+    @Synchronized override fun attachConversation(id: String, history: List<ChatDataItem>?) {
+        ownerGate.checkAccess(ownerLease)
+        provide().removeSession(sessionId)
+        sessionId = id
+        savedHistory = history?.toList()
+        generationCancelled.set(false)
+    }
+    @Synchronized override fun detachUi() { /* Wait for any uninterruptible native call to return. */ }
+
     private val ownerGate = com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate
     private lateinit var ownerLease: com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnerGate.Lease
     init { synchronized(ownerGate) { ownerLease = ownerGate.acquireChat { release() } } }
@@ -94,7 +106,7 @@ class SanaSession(
                 useCfg,
                 cfgScale,
                 object : GenerateProgressListener {
-                    override fun onProgress(progress: String?): Boolean = ownerLease.cancelled.get() || progressListener.onProgress(progress)
+                    override fun onProgress(progress: String?): Boolean = ownerLease.cancelled.get() || generationCancelled.get() || progressListener.onProgress(progress)
                 }
             ) ?: HashMap<String, Any>().apply {
                 put("error", true)

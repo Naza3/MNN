@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: rebind retained chat history.
 //
 // Created by ruoyi.sdj on 2025/4/18.
 //
@@ -28,6 +29,7 @@ class LlmSession {
 public:
     LlmSession(std::string, json config, json extra_config, std::vector<std::string> string_history);
     void Reset();
+    void ReplaceHistory(const std::vector<std::string>& history);
     bool Load();
     bool isModelReady() const { return llm_ != nullptr && model_loaded_; }
     /** Last error message when Load() fails. Cleared on success. */

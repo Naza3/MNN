@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: optional retained model residency.
 // Created by ruoyi.sjd on 2025/1/13.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 package com.alibaba.mnnllm.android.utils
@@ -7,6 +8,9 @@ import android.preference.PreferenceManager
 import com.alibaba.mnnllm.android.utils.DeviceUtils.isChinese
 
 object PreferenceUtils {
+    const val KEY_KEEP_MODEL_LOADED = "keep_model_loaded"
+    fun keepModelLoaded(context: Context): Boolean = getBoolean(context, KEY_KEEP_MODEL_LOADED, true)
+
     const val TAG: String = "PreferenceUtils"
     const val KEY_SHOW_PERFORMACE_METRICS: String = "SHOW_PERFORMACE_METRICS"
 

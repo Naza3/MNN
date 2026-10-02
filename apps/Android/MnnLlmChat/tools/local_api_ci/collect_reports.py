@@ -10,6 +10,8 @@ import shutil
 import xml.etree.ElementTree as ET
 import zipfile
 
+from engine_source import verified_engine_paths
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[4]
 APP = HERE.parents[1]
@@ -46,6 +48,13 @@ def main():
     notice_dir = out/'notices'
     notice_dir.mkdir(exist_ok=True)
     records = []
+    native_root = None
+    try:
+        native_root, _ = verified_engine_paths(out)
+        native_notice_status = 'verified_official_release_source'
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        native_notice_status = 'unavailable: official release preparation did not complete'
+    (out/'native-notice-source.json').write_text(json.dumps({'status':native_notice_status},indent=2)+'\n')
     def save_notice(origin, name, data):
         filename = re.sub(r'[^A-Za-z0-9_.-]', '_', name)[:180]
         target = notice_dir/(digest(data)[:12]+'-'+filename)
@@ -53,22 +62,22 @@ def main():
         records.append({'origin': origin, 'file': target.name, 'sha256': digest(data)})
     for relative in ['LICENSE.txt','3rd_party/flatbuffers/LICENSE.txt','3rd_party/half/LICENSE.txt',
                      'apps/frameworks/sherpa-mnn/LICENSE','apps/frameworks/sherpa-mnn/NOTICE']:
-        file = ROOT/relative
-        if file.is_file():
-            save_notice(relative,relative,file.read_bytes())
+        file = native_root/relative if native_root else None
+        if file is not None and file.is_file():
+            save_notice('official-release:'+relative,relative,file.read_bytes())
     # Preserve the verbatim license-bearing sections of header-only dependencies.
     for relative, start in [('3rd_party/imageHelper/stb_image.h','ALTERNATIVE A - MIT License'),
                             ('3rd_party/imageHelper/stb_image_resize.h','ALTERNATIVE A - MIT License'),
                             ('3rd_party/imageHelper/stb_image_write.h','ALTERNATIVE A - MIT License')]:
-        file=ROOT/relative
-        if file.is_file() and start in file.read_text(errors='replace'):
-            save_notice(relative,relative+'.license.txt',(start+file.read_text(errors='replace').split(start,1)[1]).encode())
+        file=native_root/relative if native_root else None
+        if file is not None and file.is_file() and start in file.read_text(errors='replace'):
+            save_notice('official-release:'+relative,relative+'.license.txt',(start+file.read_text(errors='replace').split(start,1)[1]).encode())
     for relative, lines in [('apps/frameworks/3rd_party/include/nlohmann/json.hpp',50),
                             ('apps/frameworks/mnn_tts/include/piper/uni_algo.hpp',-200)]:
         file=ROOT/relative
         if file.is_file():
             text=file.read_text(errors='replace').splitlines()
-            save_notice(relative,relative+'.notice-excerpt.txt','\n'.join(text[:lines] if lines>0 else text[lines:]).encode())
+            save_notice('app-source:'+relative,relative+'.notice-excerpt.txt','\n'.join(text[:lines] if lines>0 else text[lines:]).encode())
     cache=args.gradle_home/'caches/modules-2/files-2.1'
     inventory_path=out/'dependency-inventory.json'
     inventory=json.loads(inventory_path.read_text()) if inventory_path.exists() else []

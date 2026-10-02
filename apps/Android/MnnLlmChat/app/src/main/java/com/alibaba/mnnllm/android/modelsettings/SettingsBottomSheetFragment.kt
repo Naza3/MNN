@@ -533,6 +533,10 @@ class SettingsBottomSheetFragment : BaseSettingsBottomSheetFragment() {
     }
 
     override fun saveSettings() {
+        runForRuntimeAttachment { saveAttachedSettings() }
+    }
+
+    private fun saveAttachedSettings() {
         var needRecreate = this.needRecreateActivity
         var needSaveConfig = false
         if (currentConfig == loadedConfig) {
@@ -573,6 +577,7 @@ class SettingsBottomSheetFragment : BaseSettingsBottomSheetFragment() {
     }
 
     override fun onAfterSettingsReset() {
+        if (!isRuntimeAttachmentCurrent()) return
         super.onAfterSettingsReset()
         currentConfig.systemPrompt = currentConfig.systemPrompt ?: defaultConfig.systemPrompt
         binding.editTextSystemPrompt.setText(currentConfig.systemPrompt)
@@ -580,11 +585,12 @@ class SettingsBottomSheetFragment : BaseSettingsBottomSheetFragment() {
         binding.editMaxNewTokens.setText(currentConfig.maxNewTokens.toString())
         updateSamplerSettings()
         updateSamplerSettingsVisibility()
-        chatSession?.updateSystemPrompt(currentConfig.systemPrompt ?: defaultConfig.systemPrompt ?: "")
-        chatSession?.updateMaxNewTokens(currentConfig.maxNewTokens ?: defaultConfig.maxNewTokens ?: 2048)
+        runForRuntimeAttachment {
+            chatSession?.updateSystemPrompt(currentConfig.systemPrompt ?: defaultConfig.systemPrompt ?: "")
+            chatSession?.updateMaxNewTokens(currentConfig.maxNewTokens ?: defaultConfig.maxNewTokens ?: 2048)
+            chatSession?.updateConfig("""{"prompt_cache": ${currentConfig.promptCache ?: false}}""")
+        }
         binding.promptCacheToggle.isChecked = currentConfig.promptCache ?: false
-        val llmSession = chatSession as? com.alibaba.mnnllm.android.llm.LlmSession
-        llmSession?.updateConfig("""{"prompt_cache": ${currentConfig.promptCache ?: false}}""")
     }
 
     override fun onDestroyView() {
@@ -592,8 +598,9 @@ class SettingsBottomSheetFragment : BaseSettingsBottomSheetFragment() {
         _binding = null
     }
 
-    fun setSession(chatSession: LlmSession?) {
+    fun setSession(chatSession: LlmSession?, epoch: Long? = null) {
         this.chatSession = chatSession
+        setRuntimeAttachment(chatSession, epoch)
     }
 
     fun setModelItem(modelItem: ModelItem) {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 MNN Chat API contributors. Licensed under Apache-2.0. -->
+<resources>
+    <string name="keep_model_loaded">Keep model loaded after leaving chat</string>
+    <string name="keep_model_loaded_description">On by default. Returning to the model list keeps weights in memory, using RAM and possibly battery. Unload here or from the chat menu. Switching models or changing model configuration safely replaces the previous runtime. Android may still end the process; this does not start a background service.</string>
+    <string name="unload_model">Unload current model</string>
+    <string name="no_resident_model">No chat model is loaded</string>
+    <string name="resident_model_status">Loaded model: %1$s</string>
+    <string name="model_unloading">Stopping generation and unloading…</string>
+    <string name="model_unload_failed">Cleanup could not be confirmed. Do not load another model; restart the app.</string>
+    <string name="model_unload_stop_api">Stop the local API and wait for cleanup before unloading its model.</string>
+    <string name="model_settings_busy">The model is busy or this chat was replaced. Wait for generation to finish, then reopen settings.</string>
+</resources>

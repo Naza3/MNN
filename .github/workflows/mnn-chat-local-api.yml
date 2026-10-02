@@ -26,6 +26,8 @@ jobs:
       CI_TOOLS: apps/Android/MnnLlmChat/tools/local_api_ci
       REPORT_DIR: ${{ github.workspace }}/local-api-ci-report
       NATIVE_JOBS: '2'
+      MNN_ENGINE_SOURCE_ROOT: ${{ runner.temp }}/mnn-official-release
+      MNN_ENGINE_INSTALL_ROOT: ${{ runner.temp }}/mnn-official-release/project/android/build_64
     steps:
       - name: Check out the exact App commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -33,7 +35,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           submodules: false
-      - name: Freeze and verify latest upstream engine at job start
+      - name: Freeze and check out latest official stable release at job start
         id: preflight
         run: python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
       - name: Use JDK 17
@@ -75,6 +77,11 @@ jobs:
         run: |
           python3 "$CI_TOOLS/verify_pem_scanner.py" \
             --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
+      - name: Verify App and TTS CMake use the same isolated engine roots
+        id: engine_roots
+        run: |
+          python3 "$CI_TOOLS/verify_engine_roots.py" \
+            --cmake "$ANDROID_SDK_ROOT/cmake/3.22.1/bin/cmake" --report-dir "$REPORT_DIR"
       - name: Verify Gradle CI task registration before native compilation
         id: gradle_init
         run: |
@@ -82,7 +89,7 @@ jobs:
           python3 "$CI_TOOLS/verify_gradle_init.py" \
             --wrapper "$RUNNER_TEMP/mnn-local-api-wrapper-$(id -u)/gradlew" \
             --report-dir "$REPORT_DIR" --negative-control
-      - name: Build current-source MNN arm64 engine
+      - name: Build pinned official-release MNN arm64 engine
         id: native
         run: bash "$CI_TOOLS/build_native.sh"
       - name: Build source-locked Sherpa ASR JNI and preserve dependency notices
@@ -144,7 +151,7 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib
           steps = json.loads(os.environ['STEP_RESULTS'])
-          expected = ['preflight', 'toolchain', 'helpers', 'apk_metadata', 'pem_scanner', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'inventory', 'reports']
+          expected = ['preflight', 'toolchain', 'helpers', 'apk_metadata', 'pem_scanner', 'engine_roots', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'inventory', 'reports']
           outcomes = {name: steps.get(name, {}).get('outcome', 'not_run') for name in expected}
           out = pathlib.Path(os.environ['REPORT_DIR'])
           out.mkdir(parents=True, exist_ok=True)

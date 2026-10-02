@@ -111,6 +111,7 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedInstanceState?.getString("resident_chat_session_id")?.let { intent.putExtra("chatSessionId", it) }
         if (redirectToLocalApi()) return
         binding = ActivityChatBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -152,7 +153,8 @@ class ChatActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (!isFinishing) redirectToLocalApi()
+        if (!isFinishing && !redirectToLocalApi() && chatSession != null &&
+            ::chatPresenter.isInitialized && !chatPresenter.isCurrentAttachment()) finish()
     }
 
     private fun setupView(modelId:String, modelName: String) {
@@ -205,7 +207,7 @@ class ChatActivity : AppCompatActivity() {
         this.chatInputModule!!.apply {
             setOnThinkingModeChanged {isThinking ->
                 Log.d(TAG, "isThinking: $isThinking")
-                (chatSession as LlmSession).updateThinking(isThinking)
+                chatPresenter.mutateSession { it.updateThinking(isThinking) }
             }
             setOnAudioOutputModeChanged {
                 chatPresenter.setEnableAudioOutput(it)
@@ -222,15 +224,21 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun setupSession() {
-        try { chatSession = chatPresenter.createSession() } catch (e: IllegalStateException) {
-            if (!redirectToLocalApi()) onModelLoadFailed(e.message ?: "Runtime is busy")
-            return
+        onLoadingChanged(true)
+        lifecycleScope.launch {
+            try {
+                val session = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { chatPresenter.createSession() }
+                if (!chatPresenter.isCurrentAttachment() || isFinishing) return@launch
+                chatSession = session
+                sessionId = session.sessionId
+                CrashReportContext.setCurrentModel(modelId, sessionId)
+                onSessionCreated()
+                chatPresenter.load()
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                if (!isFinishing && !redirectToLocalApi()) onModelLoadFailed(e.message ?: "Runtime is busy")
+            }
         }
-        sessionId = chatSession!!.sessionId
-        CrashReportContext.setCurrentModel(modelId, sessionId)
-        onSessionCreated()
-        Log.d(TAG, "current SessionId: $sessionId")
-        chatPresenter.load()
     }
 
     private fun shouldStartMockStream(): Boolean {
@@ -357,13 +365,16 @@ class ChatActivity : AppCompatActivity() {
     }
 
     private fun setupOmni() {
+        if (!chatPresenter.isCurrentAttachment()) return
+        audioPlayer?.destroy()
         audioPlayer = AudioChunksPlayer()
         audioPlayer!!.sampleRate = 24000  // Use same sample rate as original AudioPlayer
         audioPlayer!!.start()
         
-        (chatSession as LlmSession).setAudioDataListener(object : AudioDataListener {
+        val listener = object : AudioDataListener {
             override fun onAudioData(data: FloatArray, isEnd: Boolean): Boolean {
                 this@ChatActivity.lifecycleScope.launch {
+                    if (!chatPresenter.isCurrentAttachment()) return@launch
                     if (isRealTimePlayback) {
                         // Real-time playback mode: play immediately but also save for replay
                         audioPlayer?.playChunk(data)
@@ -379,9 +390,10 @@ class ChatActivity : AppCompatActivity() {
                         handleBufferedAudioData(data, isEnd)
                     }
                 }
-                return chatPresenter.stopGenerating
+                return !chatPresenter.isCurrentAttachment() || chatPresenter.stopGenerating
             }
-        })
+        }
+        chatPresenter.mutateSession { (it as? LlmSession)?.setAudioDataListener(listener) }
     }
 
     private suspend fun handleBufferedAudioData(data: FloatArray, isEnd: Boolean) {
@@ -489,7 +501,8 @@ class ChatActivity : AppCompatActivity() {
 
     fun onLoadingChanged(loading: Boolean) {
         if (com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) {
-            if (!isFinishing) redirectToLocalApi()
+            if (!isFinishing && !redirectToLocalApi() && chatSession != null &&
+            ::chatPresenter.isInitialized && !chatPresenter.isCurrentAttachment()) finish()
             return
         }
         isLoading = loading
@@ -500,7 +513,7 @@ class ChatActivity : AppCompatActivity() {
             supportActionBar!!.setDisplayHomeAsUpEnabled(true)
             binding.modelSwitcher.text = modelName
         }
-        if (!loading) {
+        if (!loading && chatPresenter.isCurrentAttachment()) {
             if (chatSession!!.supportOmni) {
                 setupOmni()
             }
@@ -539,6 +552,22 @@ class ChatActivity : AppCompatActivity() {
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId != android.R.id.home && !chatPresenter.isCurrentAttachment()) return true
+        if (item.itemId == R.id.menu_unload_model) {
+            chatPresenter.stopGenerate()
+            val sessionToUnload = chatSession ?: return true
+            val epochToUnload = chatPresenter.getRuntimeLeaseEpoch()
+            lifecycleScope.launch {
+                try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController()
+                            .detachChatSession(sessionToUnload, epochToUnload, false)
+                    }
+                    finish()
+                } catch (_: Exception) { Toast.makeText(this@ChatActivity, R.string.model_unload_failed, Toast.LENGTH_LONG).show() }
+            }
+            return true
+        }
         if (item.itemId == R.id.start_new_chat) {
             handleNewSession()
         } else if (item.itemId == R.id.start_voice_chat) {
@@ -557,9 +586,9 @@ class ChatActivity : AppCompatActivity() {
                 SettingsBottomSheetFragment().apply {
                     setModelId(modelId!!)
                     setConfigPath(intent.getStringExtra("configFilePath"))
-                    setSession(session)
+                    setSession(session, chatPresenter.getRuntimeLeaseEpoch())
                     addOnSettingsDoneListener{needRecreate->
-                        if (needRecreate) {
+                        if (needRecreate && chatPresenter.isCurrentAttachment()) {
                             recreate()
                         }
                     }
@@ -567,10 +596,11 @@ class ChatActivity : AppCompatActivity() {
             } else {
                 // For Sana and other diffusion models
                 DiffusionSettingsBottomSheetFragment().apply {
+                    setRuntimeAttachment(session, chatPresenter.getRuntimeLeaseEpoch())
                     setModelId(modelId!!)
                     setConfigPath(intent.getStringExtra("configFilePath"))
                     addOnSettingsDoneListener{needRecreate->
-                        if (needRecreate) {
+                        if (needRecreate && chatPresenter.isCurrentAttachment()) {
                             recreate()
                         }
                     }
@@ -578,11 +608,15 @@ class ChatActivity : AppCompatActivity() {
             }
             return true
         } else if (item.itemId == R.id.menu_item_benchmark_test) {
-            chatSession!!.setKeepHistory(false)
+            val benchmarkSession = chatSession ?: return true
+            val benchmarkEpoch = chatPresenter.getRuntimeLeaseEpoch()
+            chatPresenter.mutateSession { it.setKeepHistory(false) }
             benchmarkModule.start(waitForLastCompleted = {
                 waitForGeneratingFinished()
             }, handleSendMessage = { message ->
-                chatSession!!.reset()
+                chatPresenter.prepareBenchmarkMessage(benchmarkSession, benchmarkEpoch)
+                check(com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController()
+                    .isChatAttachmentCurrent(benchmarkSession, benchmarkEpoch)) { "Benchmark chat was replaced" }
                 return@start handleSendMessage(createUserMessage(message))
             })
         } else if (item.itemId == R.id.menu_item_api_settings) {
@@ -658,6 +692,11 @@ class ChatActivity : AppCompatActivity() {
 
     private suspend fun handleSendMessage(userData: ChatDataItem): HashMap<String, Any> {
         return chatPresenter.sendMessage(userData)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        sessionId?.let { outState.putString("resident_chat_session_id", it) }
+        super.onSaveInstanceState(outState)
     }
 
     override fun onDestroy() {
@@ -797,7 +836,7 @@ class ChatActivity : AppCompatActivity() {
         }
     }
 
-    fun onGenerateFinished(benchMarkResult: HashMap<String, Any>) {
+    fun onGenerateFinished(benchMarkResult: HashMap<String, Any>, conversationId: String? = sessionId) {
         setIsGenerating(false)
         val recentItem = chatListComponent.recentItem!!
         recentItem.loading = false
@@ -830,7 +869,7 @@ class ChatActivity : AppCompatActivity() {
         
         // Always save to database, even for errors, to maintain conversation history
         try {
-            chatPresenter.saveResponseToDatabase(recentItem)
+            chatPresenter.saveResponseToDatabase(recentItem, conversationId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to save response to database", e)
         }
@@ -1015,9 +1054,6 @@ class ChatActivity : AppCompatActivity() {
         }
         val currentChatHistory = chatListComponent.getCurrentChatHistory()
         
-        // Update model info without recreating components
-        updateModelInfo(selectedModelId!!, selectedModelName)
-        
         chatPresenter.switchModel(
             selectedModelItem,
             currentChatHistory,
@@ -1028,6 +1064,11 @@ class ChatActivity : AppCompatActivity() {
                 Log.e(TAG, "Error switching model", error)
                 Toast.makeText(this, "Failed to switch model: ${error.message}", Toast.LENGTH_LONG).show()
             }, onSessionCreated = { newSession ->
+                updateModelInfo(selectedModelId!!, selectedModelName)
+                intent.putExtra("modelId", selectedModelId)
+                intent.putExtra("modelName", selectedModelName)
+                intent.putExtra("configFilePath", ModelUtils.getConfigPathForModel(selectedModelItem))
+                intent.putExtra("diffusionDir", ModelUtils.getConfigPathForModel(selectedModelItem))
                 chatSession = newSession
                 sessionId = newSession.sessionId
                 CrashReportContext.setCurrentModel(modelId, sessionId)

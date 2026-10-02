@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: rebind retained chat history.
 #include <android/asset_manager_jni.h>
 #include <android/bitmap.h>
 #include <android/log.h>
@@ -385,6 +386,31 @@ JNIEXPORT jobject JNICALL Java_com_alibaba_mnnllm_android_llm_LlmSession_submitF
 }
 
 
+
+// Called only under the session monitor after the previous generation has returned.
+JNIEXPORT void JNICALL
+Java_com_alibaba_mnnllm_android_llm_LlmSession_replaceHistoryNative(JNIEnv* env, jobject thiz,
+                                                                  jlong llmPtr, jobject values) {
+    auto* session = reinterpret_cast<mls::LlmSession*>(llmPtr);
+    if (!session) return;
+    std::vector<std::string> history;
+    jclass listClass = env->GetObjectClass(values);
+    jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
+    jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+    const jint count = env->CallIntMethod(values, sizeMethod);
+    for (jint i = 0; i < count && !env->ExceptionCheck(); ++i) {
+        auto value = static_cast<jstring>(env->CallObjectMethod(values, getMethod, i));
+        if (!value) continue;
+        const char* text = env->GetStringUTFChars(value, nullptr);
+        if (text) {
+            history.emplace_back(text);
+            env->ReleaseStringUTFChars(value, text);
+        }
+        env->DeleteLocalRef(value);
+    }
+    env->DeleteLocalRef(listClass);
+    if (!env->ExceptionCheck()) session->ReplaceHistory(history);
+}
 
 JNIEXPORT void JNICALL
 Java_com_alibaba_mnnllm_android_llm_LlmSession_resetNative(JNIEnv *env, jobject thiz,

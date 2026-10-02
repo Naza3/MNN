@@ -4,6 +4,7 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 APP="$(cd "$HERE/../.." && pwd)"
 ROOT="$(git -C "$HERE" rev-parse --show-toplevel)"
 export REPORT_DIR="${REPORT_DIR:-$ROOT/local-api-ci-report}"
+python3 "$HERE/engine_source.py" --report-dir "$REPORT_DIR"
 # A disposable copy allows SHA-256 verification without editing upstream wrapper files.
 WRAPPER="${RUNNER_TEMP:-/tmp}/mnn-local-api-wrapper-$(id -u)"
 python3 - "$HERE" "$APP" "$WRAPPER" <<'PY'

@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: drain retained chat before an independent voice task.
 // Created by ruoyi.sjd on 2025/6/18.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 
@@ -17,6 +18,7 @@ class LlmService {
     private var stopRequested = false
     suspend fun init(modelDir: String?): Boolean = withContext(Dispatchers.IO) {
         Log.d(TAG, "createSession begin")
+        com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController().unloadChatModel()
         chatSession = ChatService.provide().createLlmSession(
             "test_modelId_sessionId",
             "$modelDir/config.json",

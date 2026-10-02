@@ -30,6 +30,23 @@
                 android:orientation="vertical">
 
                 <com.alibaba.mnnllm.android.modelsettings.SettingsItemView
+                    android:id="@+id/item_keep_model_loaded"
+                    style="@style/SettingsRowContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="16dp"
+                    android:paddingEnd="16dp"
+                    app:itemText="@string/keep_model_loaded" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="12dp"
+                    android:text="@string/keep_model_loaded_description" />
+                <TextView android:id="@+id/btn_unload_model" style="@style/SettingsRowClickable"
+                    android:paddingStart="16dp" android:paddingEnd="16dp" android:text="@string/unload_model" />
+                <TextView android:id="@+id/resident_model_status" android:layout_width="match_parent"
+                    android:layout_height="wrap_content" android:paddingStart="16dp"
+                    android:paddingEnd="16dp" android:paddingBottom="12dp" />
+
+                <com.alibaba.mnnllm.android.modelsettings.SettingsItemView
                     android:id="@+id/item_stop_download"
                     style="@style/SettingsRowContainer"
                     android:layout_width="match_parent"

@@ -82,6 +82,7 @@ class MainSettingsFragment : Fragment() {
             sharedPreferences.edit().putBoolean("stop_download_on_chat", isChecked).apply()
         }
 
+        setupModelResidency()
         setupDownloadProvider(sharedPreferences)
         setupVoiceModelManagement()
         setupStorageManagement()
@@ -98,6 +99,42 @@ class MainSettingsFragment : Fragment() {
         setupResetApiConfig()
         setupUpdateAndVersion()
         setupDebugMode(sharedPreferences)
+    }
+
+    private fun setupModelResidency() {
+        val controller = com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController()
+        fun refresh() {
+            if (_binding == null) return
+            val model = controller.getResidentModelId()
+            binding.residentModelStatus.text = if (model == null) getString(R.string.no_resident_model)
+                else getString(R.string.resident_model_status, model)
+        }
+        fun unload() {
+            if (com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) {
+                Toast.makeText(requireContext(), R.string.model_unload_stop_api, Toast.LENGTH_LONG).show()
+                return
+            }
+            binding.btnUnloadModel.isEnabled = false
+            binding.residentModelStatus.setText(R.string.model_unloading)
+            // Cleanup outlives the settings view and never blocks the main thread.
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob()).launch {
+                val success = runCatching { controller.unloadChatModel() }.isSuccess
+                withContext(Dispatchers.Main) {
+                    if (_binding != null) {
+                        binding.btnUnloadModel.isEnabled = true
+                        if (success) refresh() else binding.residentModelStatus.setText(R.string.model_unload_failed)
+                    }
+                }
+            }
+        }
+        binding.itemKeepModelLoaded.isChecked = com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(requireContext())
+        binding.itemKeepModelLoaded.setOnCheckedChangeListener { enabled ->
+            com.alibaba.mnnllm.android.utils.PreferenceUtils.setBoolean(requireContext(),
+                com.alibaba.mnnllm.android.utils.PreferenceUtils.KEY_KEEP_MODEL_LOADED, enabled)
+            if (!enabled) unload()
+        }
+        binding.btnUnloadModel.setOnClickListener { unload() }
+        refresh()
     }
 
     private fun setupDownloadProvider(

@@ -78,6 +78,8 @@ class BenchmarkService {
             
             Log.d(TAG, "Using config path: $configPath")
             
+            // A benchmark is an explicit new model task. Drain the retained chat before allocating.
+            com.alibaba.mnnllm.api.openai.di.ServiceLocator.getLlmRuntimeController().unloadChatModel()
             llmSession = ChatService.provide().createLlmSession(
                 modelId,
                 configPath,

@@ -136,6 +136,8 @@ def main():
         project, fixture_report, mnn = create_fixture(directory)
         env = os.environ.copy()
         env['REPORT_DIR'] = str(fixture_report)
+        env['MNN_ENGINE_SOURCE_ROOT'] = str(mnn.parents[4])
+        env['MNN_ENGINE_INSTALL_ROOT'] = str(mnn.parents[1])
         command = launcher + ['--project-dir', str(project), '--configure-on-demand', '--no-daemon',
                               '--console=plain', '--max-workers=1', '-Dorg.gradle.jvmargs=-Xmx512m']
         cases = []

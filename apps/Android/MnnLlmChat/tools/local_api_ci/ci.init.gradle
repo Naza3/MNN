@@ -7,6 +7,21 @@ import org.gradle.api.attributes.Attribute
 
 def reportDirectory = System.getenv('REPORT_DIR')
 if (!reportDirectory) throw new GradleException('REPORT_DIR is required')
+// Explicit CMake arguments make engine-root changes part of AGP's native
+// configuration inputs; environment inheritance alone would miss cache reuse.
+gradle.beforeProject { nativeProject ->
+    if (!(nativeProject.path in [':app', ':mnn_tts'])) return
+    ['com.android.application', 'com.android.library'].each { pluginId ->
+        nativeProject.plugins.withId(pluginId) {
+            def sourceRoot = System.getenv('MNN_ENGINE_SOURCE_ROOT')
+            def installRoot = System.getenv('MNN_ENGINE_INSTALL_ROOT')
+            if (!sourceRoot || !installRoot) throw new GradleException('Official-release engine roots are required')
+            nativeProject.extensions.getByName('android').defaultConfig.externalNativeBuild.cmake.arguments(
+                "-DMNN_ENGINE_SOURCE_ROOT:PATH=${sourceRoot}",
+                "-DMNN_ENGINE_INSTALL_ROOT:PATH=${installRoot}")
+        }
+    }
+}
 // Register before each project's build script is evaluated. projectsEvaluated
 // runs too late for explicit task selection with configuration-on-demand.
 gradle.beforeProject { app ->
@@ -19,7 +34,15 @@ gradle.beforeProject { app ->
             def record = new groovy.json.JsonSlurper().parse(provenance)
             def digest = MessageDigest.getInstance('SHA-256').digest(library.bytes).encodeHex().toString()
             def lock = new groovy.json.JsonSlurper().parse(app.rootProject.file('tools/local_api_ci/build-lock.json'))
-            def mnn = app.rootProject.file('../../../project/android/build_64/lib/libMNN.so')
+            def engineRoot = System.getenv('MNN_ENGINE_SOURCE_ROOT')
+            def installRoot = System.getenv('MNN_ENGINE_INSTALL_ROOT')
+            if (!engineRoot || !installRoot || !new File(engineRoot).isAbsolute() || !new File(installRoot).isAbsolute()) {
+                throw new GradleException('Explicit official-release engine source/install roots are required')
+            }
+            if (new File(installRoot).canonicalFile != new File(engineRoot, 'project/android/build_64').canonicalFile) {
+                throw new GradleException('Engine source and install roots do not belong to the same release checkout')
+            }
+            def mnn = new File(installRoot, 'lib/libMNN.so')
             def inputs = new File(reportDirectory, 'sherpa-source-inputs.json')
             if (!mnn.isFile() || !inputs.isFile()) throw new GradleException('Current MNN/source input evidence is missing')
             def mnnHash = MessageDigest.getInstance('SHA-256').digest(mnn.bytes).encodeHex().toString()

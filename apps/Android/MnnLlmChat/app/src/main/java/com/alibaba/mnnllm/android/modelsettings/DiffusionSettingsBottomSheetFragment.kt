@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: guard configuration writes by UI attachment.
 // Created by ruoyi.sjd on 2025/4/29.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 
@@ -164,6 +165,10 @@ class DiffusionSettingsBottomSheetFragment : BaseSettingsBottomSheetFragment() {
     }
 
     override fun saveSettings() {
+        runForRuntimeAttachment { saveAttachedSettings() }
+    }
+
+    private fun saveAttachedSettings() {
         var needRecreate = needRecreateActivity
         var needSaveConfig = false
 

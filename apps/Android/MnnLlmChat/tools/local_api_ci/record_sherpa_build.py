@@ -9,6 +9,7 @@ import subprocess
 
 from audit_apk import dynamic_symbols, elf_load_segments
 from prepare_sherpa_sources import sha256
+from engine_source import verified_engine_paths
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[4]
@@ -49,6 +50,7 @@ def main():
     args = parser.parse_args()
     config = json.loads((HERE/'build-lock.json').read_text())
     lock = config['sherpa']
+    engine_root, engine_install = verified_engine_paths(args.report_dir)
     inputs = json.loads((args.report_dir/'sherpa-source-inputs.json').read_text())
     if inputs['status'] != 'verified':
         raise RuntimeError('Verified source inputs are missing')
@@ -71,7 +73,7 @@ def main():
     link_files = sorted(args.build_dir.glob('**/CMakeFiles/sherpa-mnn-jni.dir/link.txt'))
     if len(link_files) != 1:
         raise RuntimeError('Expected one auditable Sherpa JNI link command')
-    link_text = link_files[0].read_text().replace(str(ROOT), '<checkout>').replace(str(sdk), '<android-sdk>')
+    link_text = link_files[0].read_text().replace(str(engine_root), '<official-release>').replace(str(ROOT), '<app-checkout>').replace(str(sdk), '<android-sdk>')
     (args.report_dir/'sherpa-link.txt').write_text(link_text)
     static_archives = [{'path': str(path.relative_to(args.build_dir)), 'sha256': sha256(path), 'size': path.stat().st_size}
                        for path in sorted(args.build_dir.glob('**/*.a'))]
@@ -87,7 +89,7 @@ def main():
               'app_commit_sha':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
               'built_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'library_sha256':sha256(args.library), 'load_segments':segments,
-              'mnn_library_sha256':sha256(ROOT/'project/android/build_64/lib/libMNN.so'),
+              'mnn_library_sha256':sha256(engine_install/'lib/libMNN.so'),
               'required_jni_exports':lock['required_jni_exports'],
               'source_inputs_report_sha256':sha256(args.report_dir/'sherpa-source-inputs.json'),
               'static_archives':static_archives, 'configuration':options,

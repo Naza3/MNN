@@ -24,7 +24,7 @@ def manifest(exported='false', service_type='specialUse'):
     expected=LOCK['expected_apk']
     permissions=''.join(f'<uses-permission android:name="android.permission.{name}" />'
                         for name in ['INTERNET','FOREGROUND_SERVICE','FOREGROUND_SERVICE_SPECIAL_USE','POST_NOTIFICATIONS'])
-    return f'''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{expected['package']}" android:versionCode="831" android:versionName="0.8.3-localapi.1">
+    return f'''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="{expected['package']}" android:versionCode="{expected['version_code']}" android:versionName="{expected['version_name']}">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="35" />{permissions}
     <application android:allowBackup="false" android:fullBackupContent="false" android:dataExtractionRules="@xml/local_api_data_extraction_rules"><service android:name="{expected['service']}" android:exported="{exported}"
     android:foregroundServiceType="{service_type}"><property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
@@ -51,7 +51,7 @@ class AuditHelpersTest(unittest.TestCase):
         self.assertTrue(any('specialUse' in x for x in validate_manifest(manifest(service_type='dataSync'),LOCK['expected_apk'])[1]))
 
     def test_wrong_version_rejected(self):
-        xml=manifest().replace('android:versionCode="831"','android:versionCode="830"')
+        xml=manifest().replace('android:versionCode="'+LOCK['expected_apk']['version_code']+'"','android:versionCode="830"')
         self.assertTrue(any('version_code' in x for x in validate_manifest(xml,LOCK['expected_apk'])[1]))
 
     def test_enabled_backup_rejected(self):

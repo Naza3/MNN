@@ -1,3 +1,4 @@
+// Modified by MNN Chat API contributors, 2026: retained model with independent UI attachments.
 // Created by ruoyi.sjd on 2024/12/25.
 // Copyright (c) 2024 Alibaba Group Holding Limited All rights reserved.
 package com.alibaba.mnnllm.android.llm
@@ -10,6 +11,12 @@ interface ChatSession  {
 
     val supportOmni: Boolean
     fun load()
+    fun isModelLoaded(): Boolean = false
+    /** Cancels only the current UI generation, never the native owner lease. */
+    fun cancelGeneration() {}
+    /** Runs after the current native call returns. */
+    fun detachUi() {}
+    fun attachConversation(id: String, history: List<ChatDataItem>?) { reset(); setHistory(history) }
 
     fun generate(prompt: String, params: Map<String, Any>, progressListener: GenerateProgressListener): HashMap<String, Any>
 

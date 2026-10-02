@@ -1,4 +1,4 @@
-// Modified by MNN Chat API contributors, 2026: remove prompt and completion logging.
+// Modified by MNN Chat API contributors, 2026: private logs and retained conversation rebinding.
 //
 // Created by ruoyi.sjd on 2025/4/18.
 //
@@ -182,6 +182,12 @@ LlmSession::LlmSession(std::string model_path, json config, json extra_config, s
     is_r1_ = extra_config_.contains("is_r1") && extra_config_["is_r1"].get<bool>();
     system_prompt_ = config_.contains("system_prompt") ? config_["system_prompt"].get<std::string>() : "You are a helpful assistant.";
     history_.emplace_back("system", GetSystemPromptString(system_prompt_, is_r1_));
+    ReplaceHistory(history);
+}
+
+// Rebind a retained runtime to one explicit conversation, without reloading model weights.
+void LlmSession::ReplaceHistory(const std::vector<std::string>& history) {
+    Reset();
     if (!history.empty()) {
         for (int i = 0; i < history.size(); i++) {
             if (is_r1_) {

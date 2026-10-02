@@ -1,8 +1,7 @@
 {
   "schema_version": 1,
   "upstream_url": "https://github.com/alibaba/MNN.git",
-  "upstream_ref": "refs/heads/master",
-  "engine_base_sha": "024a946b0b8fcf87c8a418229fadd4cd7858ffba",
+  "engine_base_sha": "d407447ed56c4121a11ccbd266dc184ca1ead0c2",
   "toolchain": {
     "java_major": "17",
     "gradle": "8.9",
@@ -138,8 +137,8 @@
       "libmnn_tts.so",
       "libsherpa-mnn-jni.so"
     ],
-    "version_code": "831",
-    "version_name": "0.8.3-localapi.1"
+    "version_code": "832",
+    "version_name": "0.8.3-localapi.2"
   },
   "public_test_fixture": {
     "coordinate": "io.netty:netty-handler:4.1.119.Final",
@@ -151,5 +150,11 @@
     "constant_size": 1699,
     "source_symbol": "io.netty.handler.ssl.SslUtils.PROBING_KEY",
     "purpose": "Public TLS provider capability checks in OpenSsl and JdkSslServerContext; never a production credential"
+  },
+  "release_api": "https://api.github.com/repos/alibaba/MNN",
+  "official_release": {
+    "id": 358027083,
+    "tag": "3.6.1",
+    "tag_object_sha": "ea44a3ebd5dd6348eea501047b17c43aa3ecccb6"
   }
 }

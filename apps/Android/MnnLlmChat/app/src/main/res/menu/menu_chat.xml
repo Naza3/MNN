@@ -1,5 +1,6 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/menu_unload_model" android:title="@string/unload_model" app:showAsAction="never" />
     <item
         android:id="@+id/start_new_chat"
         android:title="@string/start_new_chat"

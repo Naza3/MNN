@@ -44,11 +44,29 @@ class LlmSession (
                 else ownerGate.acquireApi(apiEpoch) { release() }
         }
     }
+    private val generationCancelled = java.util.concurrent.atomic.AtomicBoolean(false)
     fun requestCancellation() { ownerLease.cancelled.set(true) }
+    override fun cancelGeneration() { generationCancelled.set(true) }
+    @Synchronized override fun detachUi() {
+        if (!ownerGate.allows(ownerLease)) return
+        if (nativePtr != 0L) {
+            setWavformCallbackNative(nativePtr, null)
+            updateEnableAudioOutputNative(nativePtr, false)
+        }
+    }
+    @Synchronized override fun attachConversation(id: String, history: List<ChatDataItem>?) {
+        checkAccess()
+        detachUi()
+        if (nativePtr != 0L) replaceHistoryNative(nativePtr, history?.mapNotNull { it.text } ?: emptyList())
+        provide().removeSession(sessionId)
+        sessionId = id
+        savedHistory = history?.toList()
+        generationCancelled.set(false)
+    }
     private fun checkAccess() = ownerGate.checkAccess(ownerLease)
     private fun cancellationListener(listener: GenerateProgressListener) = object : GenerateProgressListener {
         override fun onProgress(progress: String?): Boolean =
-            ownerLease.cancelled.get() || listener.onProgress(progress)
+            ownerLease.cancelled.get() || generationCancelled.get() || listener.onProgress(progress)
     }
 
     @Volatile
@@ -68,7 +86,8 @@ class LlmSession (
         return savedHistory
     }
 
-    override fun setHistory(history: List<ChatDataItem>?) {
+    @Synchronized override fun setHistory(history: List<ChatDataItem>?) {
+        attachConversation(sessionId, history)
     }
 
     @Synchronized
@@ -146,7 +165,7 @@ class LlmSession (
     /**
      * Check if the model is successfully loaded and ready for inference
      */
-    fun isModelLoaded(): Boolean {
+    override fun isModelLoaded(): Boolean {
         return nativePtr != 0L
     }
 
@@ -234,6 +253,8 @@ class LlmSession (
             keepHistory: Boolean,
             listener: GenerateProgressListener
     ): HashMap<String, Any>
+
+    private external fun replaceHistoryNative(instanceId: Long, history: List<String>)
 
     private external fun resetNative(instanceId: Long)
 

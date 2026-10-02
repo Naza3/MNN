@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) 2026 MNN Chat API contributors. Licensed under Apache-2.0. -->
+<resources>
+    <string name="keep_model_loaded">退出聊天后保持模型加载</string>
+    <string name="keep_model_loaded_description">默认开启。返回模型列表时仍保留模型权重，会占用内存，并可能耗电。可在这里或聊天菜单主动卸载；切换模型或修改模型配置时会安全替换旧模型。系统仍可能结束应用进程，此设置不会自动启动后台服务。</string>
+    <string name="unload_model">卸载当前模型</string>
+    <string name="no_resident_model">当前没有已加载的聊天模型</string>
+    <string name="resident_model_status">已加载模型：%1$s</string>
+    <string name="model_unloading">正在停止生成并卸载…</string>
+    <string name="model_unload_failed">无法确认清理完成，请勿加载其他模型，请重启应用。</string>
+    <string name="model_unload_stop_api">请先停止本机 API，并等待清理完成。</string>
+    <string name="model_settings_busy">模型正忙或当前聊天已被替换。请等待生成结束后重新打开设置。</string>
+</resources>

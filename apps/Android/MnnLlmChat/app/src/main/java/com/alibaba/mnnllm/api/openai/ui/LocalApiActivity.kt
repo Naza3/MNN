@@ -29,8 +29,10 @@ class LocalApiActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         title = getString(R.string.local_api_title)
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 40, 32, 24) }
+        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val status = TextView(this)
         val modelId = intent.getStringExtra("modelId") ?: OpenAIService.getInstance()?.getCurrentModelId()
         val description = TextView(this)
@@ -68,7 +70,9 @@ class LocalApiActivity : AppCompatActivity() {
         }
         val stop = button(getString(R.string.local_api_stop)) { OpenAIService.releaseService(this) }
         button(getString(R.string.local_api_back)) { finish() }
-        setContentView(ScrollView(this).apply { addView(layout) })
+        val scroll = ScrollView(this).apply { addView(layout); isFillViewport = true }
+        setContentView(scroll)
+        LocalApiInsets.install(scroll, (16 * resources.displayMetrics.density).toInt())
         lifecycleScope.launch {
             while (true) {
                 val state = RuntimeOwnership.gate.state

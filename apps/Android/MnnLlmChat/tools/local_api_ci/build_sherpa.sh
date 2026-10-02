@@ -8,10 +8,11 @@ REPORT_DIR="${REPORT_DIR:-$ROOT/local-api-ci-report}"
 read_lock() { python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["toolchain"][sys.argv[2]])' "$HERE/build-lock.json" "$1"; }
 NDK="$ANDROID_SDK_ROOT/ndk/$(read_lock ndk)"
 CMAKE="$ANDROID_SDK_ROOT/cmake/$(read_lock cmake)/bin/cmake"
-SOURCE="$ROOT/apps/frameworks/sherpa-mnn"
+python3 "$HERE/engine_source.py" --report-dir "$REPORT_DIR"
+SOURCE="$MNN_ENGINE_SOURCE_ROOT/apps/frameworks/sherpa-mnn"
 # Under App/build so all generated sources/artifacts are outside tracked code.
 BUILD="$ROOT/apps/Android/MnnLlmChat/app/build/local-api-sherpa"
-MNN="$ROOT/project/android/build_64"
+MNN="$MNN_ENGINE_INSTALL_ROOT"
 DESTINATION="$ROOT/apps/Android/MnnLlmChat/app/src/main/jniLibs/arm64-v8a/libsherpa-mnn-jni.so"
 [[ -x "$CMAKE" && -s "$MNN/lib/libMNN.so" ]]
 [[ ! -e "$BUILD/CMakeCache.txt" ]] || { echo 'Refusing to reuse an unverified Sherpa build cache' >&2; exit 1; }

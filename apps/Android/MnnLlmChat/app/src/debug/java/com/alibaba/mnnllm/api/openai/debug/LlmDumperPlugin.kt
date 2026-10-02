@@ -101,7 +101,9 @@ internal object DefaultLlmDebugController : LlmDebugController {
     override fun getThinkingEnabled(): Boolean? = runtime.getThinkingEnabled()
 
     override fun setThinkingEnabled(enabled: Boolean): Boolean {
-        return runtime.setThinkingEnabled(enabled)
+        val attachment = ownedAttachment ?: return false
+        val session = attachment.session ?: return false
+        return runtime.tryWithChatAttachment(session, attachment.chatLeaseEpoch) { session.updateThinking(enabled) }
     }
 
     override fun hasSession(): Boolean = runtime.getActiveSession() != null
@@ -180,10 +182,9 @@ internal object DefaultLlmDebugController : LlmDebugController {
             }
         }
         return runCatching {
-            if (useAppConfig) {
-                session.generate(prompt, emptyMap(), listener)
-            } else {
-                session.submitFullHistory(listOf(Pair("user", prompt)), listener)
+            runtime.withChatAttachment(session, ensureResult.chatLeaseEpoch) {
+                if (useAppConfig) session.generate(prompt, emptyMap(), listener)
+                else session.submitFullHistory(listOf(Pair("user", prompt)), listener)
             }
             submitReturned = true
 

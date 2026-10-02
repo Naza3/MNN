@@ -1,7 +1,7 @@
 # MNN Chat API (local-only fork)
 
 This fork uses package `io.github.naza3.mnnchat`, display name **MNN Chat API**, and version
-`0.8.3-localapi.1` (831). Its Android/JNI namespace stays unchanged. It installs beside the
+`0.8.3-localapi.2` (832). Its Android/JNI namespace stays unchanged. It installs beside the
 upstream app, does not migrate/read its private data, and does not offer upstream APK updates.
 Download/import models within this fork using the existing model manager.
 
@@ -20,6 +20,29 @@ Download/import models within this fork using the existing model manager.
   最多一项推理、一项排队；超额返回 429。不支持工具调用、多模态、文件读取或 `/v1/messages`。
 - Android 的省电、低内存或强制停止仍可能结束进程；不会自动后台重启或重放请求。
   真机安装、原生推理及息屏运行仍需设备验收，JVM 测试通过不代表已做过手机实测。
+
+## 保持模型加载（832 / localapi.2）
+
+- **设置 → 通用 → 退出聊天后保持模型加载** 默认开启，升级时缺少这个新偏好也按开启处理。
+  返回模型列表或重建聊天 Activity，只停止该页生成并解绑 UI，保留同一份模型权重。
+- 再次打开相同模型无需重复加载权重。新聊天使用空历史；打开历史记录使用明确选定的会话，
+  重绑时清空旧 KV/native history，不会把另一会话带入。已保存的数据库记录不受卸载影响。
+- **聊天菜单 → 卸载当前模型**，或 **设置 → 通用 → 卸载当前模型**，会先停止生成，等待
+  原生调用安全返回，再释放模型。加载/预填充/部分图像推理无法立即抢占，不能强制 free。
+- 关闭“保持模型加载”会卸载当前保留的聊天模型，后续离开聊天会释放权重。切换模型、改变模型
+  配置、显式启动独立的基准/语音模型任务，也会先释放旧聊天模型，始终最多一个 native runtime。
+- 本机 API 仍需要主动启动。**停止 API 就是主动卸载 API 模型**，必须完成真实清理；普通返回
+  模型列表不会停止 API。API 与聊天不共享聊天历史，也不会同时加载两份模型。
+- 保留权重会占用 RAM，并可能增加耗电。Android 低内存回收、强制结束或进程重启仍会卸载。
+  此选项不会启动新的后台服务，不会开机自启或在进程结束后自动恢复模型。
+- API 控制页按状态栏、导航栏、屏幕开孔和键盘的 WindowInsets 留出空间，旋转后重新计算；
+  不使用固定像素值顶开状态栏。页内仍可滚动到所有按钮。
+
+The retained-chat option defaults to true and preserves existing application data/preferences. Its
+lifetime is the current process, not a guarantee against Android reclaiming it. One resident runtime
+can have only one current UI attachment; older callbacks cannot release or mutate a newer attachment.
+Configuration fingerprint changes require a safe reload. API Stop always drains and releases its own
+runtime, regardless of this chat preference.
 
 ## Start and connect
 

@@ -35,18 +35,19 @@ import java.util.Random
  */
 class ChatPresenter(
     private val chatActivity: ChatActivity,
-    private val modelName: String,
-    private val modelId: String
+    private var modelName: String,
+    private var modelId: String
 ) {
     val dateFormat: DateFormat get() = chatActivity.dateFormat!!
-    var stopGenerating = false
-    private var sessionId: String? = null
+    @Volatile var stopGenerating = false
+    @Volatile private var destroyed = false
+    @Volatile private var sessionId: String? = null
     private var sessionName:String? = null
     private var chatDataManager: ChatDataManager? = null
     private lateinit var chatSession: ChatSession
     private var runtimeLeaseEpoch: Long? = null
     private val presenterScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var generateListener:GenerateListener? = null
+    private val callbackGuard = com.alibaba.mnnllm.api.openai.runtime.ChatCallbackGuard()
     private val additionalListeners = mutableListOf<GenerateListener>()
     
     /**
@@ -55,7 +56,7 @@ class ChatPresenter(
      * @return LlmSession instance, returns null if chatSession is not initialized or not of LlmSession type
      */
     fun getLlmSession(): com.alibaba.mnnllm.android.llm.LlmSession? {
-        return if (::chatSession.isInitialized && chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
+        return if (isCurrentAttachment() && chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
             chatSession as com.alibaba.mnnllm.android.llm.LlmSession
         } else {
             null
@@ -88,6 +89,11 @@ class ChatPresenter(
         chatDataManager = ChatDataManager.getInstance(chatActivity)
     }
 
+    fun isCurrentAttachment(): Boolean = !destroyed && ::chatSession.isInitialized &&
+        ServiceLocator.getLlmRuntimeController().isChatAttachmentCurrent(chatSession, runtimeLeaseEpoch)
+
+    fun getRuntimeLeaseEpoch(): Long? = runtimeLeaseEpoch
+
     fun createSession(): ChatSession {
         val intent = chatActivity.intent
         sessionId = intent.getStringExtra("chatSessionId")
@@ -114,26 +120,16 @@ class ChatPresenter(
         
         Log.d(TAG, "createSession: isDiffusion=${ModelTypeUtils.isDiffusionModel(modelName)}, modelName=$modelName, configPath=$configPath")
         
-        if (ModelTypeUtils.isDiffusionModel(modelName) || ModelTypeUtils.isSanaModel(modelName)) {
-            val chatService = ChatService.provide()
-            chatSession = chatService.createSession(
-                modelId, modelName, sessionId, chatDataItemList, configPath, false
-            )
-        } else {
-            val result = ServiceLocator.getLlmRuntimeController().ensureSession(
-                modelId = modelId,
-                forceReload = false,
-                useAppConfig = true,
-                configPath = configPath,
-                sessionId = sessionId,
-                historyList = chatDataItemList,
-                deferLoad = true
-            )
-            if (!result.success || result.session == null) {
-                throw IllegalStateException(result.reason ?: "Failed to ensure LLM session")
-            }
-            runtimeLeaseEpoch = result.chatLeaseEpoch
-            chatSession = result.session!!
+        check(!destroyed) { "Chat was closed before loading" }
+        val result = ServiceLocator.getLlmRuntimeController().ensureChatSession(
+            modelId, modelName, configPath, sessionId, chatDataItemList, isCallerActive = { !destroyed }
+        )
+        runtimeLeaseEpoch = result.chatLeaseEpoch
+        chatSession = result.session
+        if (destroyed) {
+            ServiceLocator.getLlmRuntimeController().detachChatSession(chatSession, runtimeLeaseEpoch,
+                com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(chatActivity))
+            throw CancellationException("Chat was closed while loading")
         }
         sessionId = chatSession.sessionId
         chatSession.setKeepHistory(true)
@@ -149,38 +145,31 @@ class ChatPresenter(
         presenterScope.launch {
             Log.d(TAG, "chatSession loading")
             chatActivity.lifecycleScope.launch {
-                if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
+                if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad || !isCurrentAttachment()) return@launch
                 chatActivity.onLoadingChanged(true)
             }
             try {
-                if (sessionForLoad is com.alibaba.mnnllm.android.llm.LlmSession &&
-                    (sessionForLoad as com.alibaba.mnnllm.android.llm.LlmSession).isModelLoaded()) {
-                    Log.d(TAG, "chatSession already loaded by LlmRuntimeController, skipping load")
-                } else {
-                    sessionForLoad.load()
+                ServiceLocator.getLlmRuntimeController().withChatAttachment(sessionForLoad, leaseForLoad) {
+                    if (!sessionForLoad.isModelLoaded()) sessionForLoad.load()
                 }
                 chatActivity.lifecycleScope.launch {
-                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
+                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad || !isCurrentAttachment()) return@launch
                     chatActivity.onLoadingChanged(false)
                 }
                 Log.d(TAG, "chatSession loaded")
             } catch (e: IllegalStateException) {
                 Log.e(TAG, "Model load failed: ${e.message}", e)
-                if (sessionForLoad is com.alibaba.mnnllm.android.llm.LlmSession) {
-                    ServiceLocator.getLlmRuntimeController().releaseSession(sessionForLoad as? com.alibaba.mnnllm.android.llm.LlmSession, leaseForLoad)
-                }
+                ServiceLocator.getLlmRuntimeController().detachChatSession(sessionForLoad, leaseForLoad, false)
                 chatActivity.lifecycleScope.launch {
-                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
+                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad || !isCurrentAttachment()) return@launch
                     chatActivity.onLoadingChanged(false)
                     chatActivity.onModelLoadFailed(e.message ?: "Model load failed")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Model load failed with unexpected error", e)
-                if (sessionForLoad is com.alibaba.mnnllm.android.llm.LlmSession) {
-                    ServiceLocator.getLlmRuntimeController().releaseSession(sessionForLoad as? com.alibaba.mnnllm.android.llm.LlmSession, leaseForLoad)
-                }
+                ServiceLocator.getLlmRuntimeController().detachChatSession(sessionForLoad, leaseForLoad, false)
                 chatActivity.lifecycleScope.launch {
-                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad) return@launch
+                    if (chatSession !== sessionForLoad || runtimeLeaseEpoch != leaseForLoad || !isCurrentAttachment()) return@launch
                     chatActivity.onLoadingChanged(false)
                     chatActivity.onModelLoadFailed(e.message ?: "Model load failed")
                 }
@@ -189,19 +178,39 @@ class ChatPresenter(
     }
 
     fun reset(onResetSuccess: (newSessionId: String) -> Unit) {
-        if (com.alibaba.mnnllm.api.openai.runtime.RuntimeOwnership.gate.isApiReserved()) return
+        if (!isCurrentAttachment()) return
+        val sessionToReset = chatSession
+        val leaseToReset = runtimeLeaseEpoch
+        val callbackToken = callbackGuard.beginReset() ?: return
+        chatActivity.onLoadingChanged(true)
+        stopGenerate()
         presenterScope.launch {
-            // Don't delete chat data - preserve history for the old session
-            // Just reset the session to get a new sessionId
-            sessionId = chatSession.reset()
-            sessionName = null  // Clear session name for the new session
-            chatActivity.lifecycleScope.launch {
-                onResetSuccess(sessionId!!)
+            try {
+                val newId = ServiceLocator.getLlmRuntimeController().withChatAttachment(sessionToReset, leaseToReset) {
+                    sessionToReset.reset()
+                }
+                chatActivity.lifecycleScope.launch {
+                    callbackGuard.completeReset(callbackToken) {
+                        if (!destroyed && chatSession === sessionToReset && runtimeLeaseEpoch == leaseToReset &&
+                            ServiceLocator.getLlmRuntimeController().isChatAttachmentCurrent(sessionToReset, leaseToReset)) {
+                            sessionId = newId
+                            sessionName = null
+                            onResetSuccess(newId)
+                            chatActivity.onLoadingChanged(false)
+                        }
+                    }
+                }
+            } catch (_: IllegalStateException) {
+                chatActivity.lifecycleScope.launch {
+                    callbackGuard.completeReset(callbackToken) {
+                        if (isCurrentAttachment()) chatActivity.onLoadingChanged(false)
+                    }
+                }
             }
         }
     }
 
-    private fun submitDiffusionRequest(input: String, userData: ChatDataItem): HashMap<String, Any> {
+    private fun submitDiffusionRequest(input: String, userData: ChatDataItem, callbacks: GenerateListener): HashMap<String, Any> {
         val prompt = resolveDiffusionPrompt(input, modelId)
         val diffusionDestPath = FileUtils.generateDestDiffusionFilePath(
             chatActivity,
@@ -231,27 +240,21 @@ class ChatPresenter(
             )
             , object : GenerateProgressListener {
                 override fun onProgress(progress: String?): Boolean {
-                    chatActivity.lifecycleScope.launch {
-                        this@ChatPresenter.generateListener?.onDiffusionGenerateProgress(progress, diffusionDestPath)
-                        additionalListeners.forEach { it.onDiffusionGenerateProgress(progress, diffusionDestPath) }
-                    }
+                    callbacks.onDiffusionGenerateProgress(progress, diffusionDestPath)
                     return false
                 }
             }
         )
     }
 
-    private fun submitLlmRequest(prompt:String): HashMap<String, Any> {
+    private fun submitLlmRequest(prompt:String, callbacks: GenerateListener): HashMap<String, Any> {
         val generateResultProcessor =
             GenerateResultProcessor()
         generateResultProcessor.generateBegin()
         val result = chatSession.generate(prompt, mapOf(), object: GenerateProgressListener {
             override fun onProgress(progress: String?): Boolean {
                 generateResultProcessor.process(progress)
-                chatActivity.lifecycleScope.launch {
-                    this@ChatPresenter.generateListener?.onLlmGenerateProgress(progress, generateResultProcessor)
-                    additionalListeners.forEach { it.onLlmGenerateProgress(progress, generateResultProcessor) }
-                }
+                callbacks.onLlmGenerateProgress(progress, generateResultProcessor)
                 if (stopGenerating) {
                     Log.d(TAG, "stopGenerating requested")
                 }
@@ -262,13 +265,13 @@ class ChatPresenter(
         return result
     }
 
-    private fun submitRequest(input: String, userData: ChatDataItem): HashMap<String, Any> {
+    private fun submitRequest(input: String, userData: ChatDataItem, callbacks: GenerateListener): HashMap<String, Any> {
         stopGenerating = false
         val benchMarkResult = try {
             if (ModelTypeUtils.isDiffusionModel(this.modelName)) {
-                submitDiffusionRequest(input, userData)
+                submitDiffusionRequest(input, userData, callbacks)
             } else {
-                submitLlmRequest(input)
+                submitLlmRequest(input, callbacks)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error during generation request", e)
@@ -280,21 +283,43 @@ class ChatPresenter(
             }
         }
         
-        chatActivity.lifecycleScope.launch {
-            this@ChatPresenter.generateListener?.onGenerateFinished(benchMarkResult)
-            additionalListeners.forEach { it.onGenerateFinished(benchMarkResult) }
-        }
+        callbacks.onGenerateFinished(benchMarkResult)
         return benchMarkResult
     }
 
     private fun updateSession(sessionId: String, modelId: String?, sessionName: String) {
         chatDataManager!!.addOrUpdateSession(sessionId, modelId)
-        chatDataManager!!.updateSessionName(this.sessionId!!, this.sessionName)
+        chatDataManager!!.updateSessionName(sessionId, sessionName)
     }
 
 
-    suspend fun requestGenerate(userData: ChatDataItem, generateListener: GenerateListener): HashMap<String, Any> {
-        this.generateListener = generateListener
+    suspend fun requestGenerate(userData: ChatDataItem, generateListener: GenerateListener? = null): HashMap<String, Any> {
+        if (!isCurrentAttachment()) return hashMapOf("error" to true, "message" to "This chat is no longer attached to the model")
+        val sessionForRequest = chatSession
+        val leaseForRequest = runtimeLeaseEpoch
+        val token = callbackGuard.tryNext { sessionId } ?: return hashMapOf(
+            "error" to true, "message" to "Conversation reset is still in progress"
+        )
+        val listeners = listOf(generateListener ?: DefaultChatActivityListener(userData, token.conversationId)) + additionalListeners.toList()
+        fun post(action: (GenerateListener) -> Unit) {
+            chatActivity.lifecycleScope.launch {
+                callbackGuard.runIfCurrent(token) {
+                    if (!destroyed && chatSession === sessionForRequest && runtimeLeaseEpoch == leaseForRequest &&
+                        sessionId == token.conversationId && ServiceLocator.getLlmRuntimeController()
+                            .isChatAttachmentCurrent(sessionForRequest, leaseForRequest)) {
+                        listeners.forEach(action)
+                    }
+                }
+            }
+        }
+        val callbacks = object : GenerateListener {
+            override fun onGenerateStart() = post { it.onGenerateStart() }
+            override fun onGenerateFinished(result: HashMap<String, Any>) = post { it.onGenerateFinished(result) }
+            override fun onLlmGenerateProgress(progress: String?, processor: GenerateResultProcessor) =
+                post { it.onLlmGenerateProgress(progress, processor) }
+            override fun onDiffusionGenerateProgress(progress: String?, path: String?) =
+                post { it.onDiffusionGenerateProgress(progress, path) }
+        }
         val prompt = PromptUtils.generateUserPrompt(userData)
         var userInputSaved = false
 
@@ -302,19 +327,21 @@ class ChatPresenter(
         try {
             if (this.sessionName.isNullOrEmpty()) {
                 this.sessionName = SessionUtils.generateSessionName(userData)
-                updateSession(sessionId!!, modelId, sessionName!!)
+                updateSession(token.conversationId!!, modelId, sessionName!!)
             }
             
             // Always save user input to database first
             Log.d(TAG, "requestGenerate: saving user input for sessionId=$sessionId")
-            chatDataManager!!.addChatData(sessionId, userData)
+            chatDataManager!!.addChatData(token.conversationId, userData)
             userInputSaved = true
             
-            this.generateListener?.onGenerateStart()
-            additionalListeners.forEach { it.onGenerateStart() }
+            callbacks.onGenerateStart()
             
             val result = presenterScope.async {
-                return@async submitRequest(prompt, userData)
+                return@async ServiceLocator.getLlmRuntimeController().withChatAttachment(sessionForRequest, leaseForRequest) {
+                    if (!callbackGuard.isCurrent(token)) throw CancellationException("Conversation was replaced before generation")
+                    submitRequest(prompt, userData, callbacks)
+                }
             }.await()
             
             return result
@@ -325,8 +352,8 @@ class ChatPresenter(
 
             // Still try to save user input even if generation fails
             try {
-                if (!userInputSaved && sessionId != null) {
-                    chatDataManager!!.addChatData(sessionId, userData)
+                if (!userInputSaved && token.conversationId != null) {
+                    chatDataManager!!.addChatData(token.conversationId, userData)
                 }
             } catch (saveException: Exception) {
                 Log.e(TAG, "requestGenerate: Failed to save user input", saveException)
@@ -340,8 +367,7 @@ class ChatPresenter(
             }
             
             // Still call onGenerateFinished to ensure UI is updated
-            this.generateListener?.onGenerateFinished(errorResult)
-            additionalListeners.forEach { it.onGenerateFinished(errorResult) }
+            callbacks.onGenerateFinished(errorResult)
             
             return errorResult
         }
@@ -355,32 +381,19 @@ class ChatPresenter(
      * Default GenerateListener that handles ChatActivity UI updates
      * This ensures all UI callbacks are executed on the main thread
      */
-    private inner class DefaultChatActivityListener(private val userData: ChatDataItem) : GenerateListener {
-        override fun onGenerateStart() {
-            chatActivity.lifecycleScope.launch {
-                chatActivity.onGenerateStart(userData)
-            }
-        }
-        
-        override fun onLlmGenerateProgress(progress: String?, generateResultProcessor: GenerateResultProcessor) {
-            chatActivity.lifecycleScope.launch {
-                chatActivity.onLlmGenerateProgress(progress, generateResultProcessor)
-            }
-        }
-        
-        override fun onDiffusionGenerateProgress(progress: String?, diffusionDestPath: String?) {
-            chatActivity.lifecycleScope.launch {
-                chatActivity.onDiffusionGenerateProgress(progress, diffusionDestPath)
-            }
-        }
-        
-        override fun onGenerateFinished(benchMarkResult: HashMap<String, Any>) {
-            chatActivity.lifecycleScope.launch {
-                chatActivity.onGenerateFinished(benchMarkResult)
-            }
-        }
+    // The per-request callback wrapper dispatches once to Main and validates its captured token.
+    private inner class DefaultChatActivityListener(
+        private val userData: ChatDataItem, private val conversationId: String?
+    ) : GenerateListener {
+        override fun onGenerateStart() = chatActivity.onGenerateStart(userData)
+        override fun onLlmGenerateProgress(progress: String?, generateResultProcessor: GenerateResultProcessor) =
+            chatActivity.onLlmGenerateProgress(progress, generateResultProcessor)
+        override fun onDiffusionGenerateProgress(progress: String?, diffusionDestPath: String?) =
+            chatActivity.onDiffusionGenerateProgress(progress, diffusionDestPath)
+        override fun onGenerateFinished(benchMarkResult: HashMap<String, Any>) =
+            chatActivity.onGenerateFinished(benchMarkResult, conversationId)
     }
-    
+
     /**
      * Send a text message - unified method for both regular and voice messages
      * This ensures proper session management and database storage
@@ -389,17 +402,19 @@ class ChatPresenter(
         val userData = ChatDataItem(ChatViewHolders.USER)
         userData.text = text
         userData.time = dateFormat.format(java.util.Date())
-        return requestGenerate(userData, DefaultChatActivityListener(userData))
+        return requestGenerate(userData)
     }
     
     /**
      * Send a pre-created ChatDataItem - for more complex message types
      */
     suspend fun sendMessage(userData: ChatDataItem): HashMap<String, Any> {
-        return requestGenerate(userData, DefaultChatActivityListener(userData))
+        return requestGenerate(userData)
     }
 
     fun destroy() {
+        callbackGuard.invalidate()
+        destroyed = true
         stopGenerate()
         presenterScope.cancel("ChatPresenter destroy")
         val sessionToRelease = if (::chatSession.isInitialized) chatSession else null
@@ -407,12 +422,8 @@ class ChatPresenter(
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
             try {
                 if (sessionToRelease != null) {
-                    if (sessionToRelease is com.alibaba.mnnllm.android.llm.LlmSession) {
-                        ServiceLocator.getLlmRuntimeController().releaseSession(sessionToRelease as? com.alibaba.mnnllm.android.llm.LlmSession, leaseToRelease)
-                    } else {
-                        Log.d(TAG, "Final cleanup: Resetting and releasing non-LLM session")
-                        sessionToRelease.release()
-                    }
+                    ServiceLocator.getLlmRuntimeController().detachChatSession(sessionToRelease, leaseToRelease,
+                        com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(chatActivity))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error during final chat session cleanup", e)
@@ -420,17 +431,32 @@ class ChatPresenter(
         }
     }
 
-    fun saveResponseToDatabase(recentItem: ChatDataItem) {
+    fun saveResponseToDatabase(recentItem: ChatDataItem, conversationId: String? = sessionId) {
         try {
             Log.d(TAG, "saveResponseToDatabase: saving response for sessionId=$sessionId")
-            this.chatDataManager?.addChatData(sessionId, recentItem)
+            this.chatDataManager?.addChatData(conversationId, recentItem)
         } catch (e: Exception) {
             Log.e(TAG, "saveResponseToDatabase: Failed to save response to database for sessionId=$sessionId", e)
         }
     }
 
-    fun setEnableAudioOutput(enable: Boolean) {
-        this.chatSession.setEnableAudioOutput(enable)
+    fun mutateSession(action: (ChatSession) -> Unit) {
+        if (!isCurrentAttachment()) return
+        val session = chatSession
+        val epoch = runtimeLeaseEpoch
+        presenterScope.launch {
+            try { ServiceLocator.getLlmRuntimeController().withChatAttachment(session, epoch) { action(session) } }
+            catch (_: IllegalStateException) { /* A newer attachment owns this runtime. */ }
+        }
+    }
+
+    fun setEnableAudioOutput(enable: Boolean) = mutateSession { it.setEnableAudioOutput(enable) }
+
+    suspend fun prepareBenchmarkMessage(expected: ChatSession, epoch: Long?) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        ServiceLocator.getLlmRuntimeController().withChatAttachment(expected, epoch) {
+            expected.setKeepHistory(false)
+            expected.reset()
+        }
     }
 
     /**
@@ -443,6 +469,7 @@ class ChatPresenter(
         onSwitchError: (Exception) -> Unit,
         onSessionCreated: (ChatSession) -> Unit
     ) {
+        val switchToken = callbackGuard.beginReset() ?: return
         presenterScope.launch {
             try {
                 chatActivity.lifecycleScope.launch {
@@ -453,21 +480,28 @@ class ChatPresenter(
                 val newSession = createNewModelSession(newModelItem, currentChatHistory)
                 updateDatabaseForModelSwitch(oldSessionId, newModelItem.modelId!!)
                 chatActivity.lifecycleScope.launch {
-                    onSessionCreated(newSession)
+                    if (isCurrentAttachment()) onSessionCreated(newSession)
                 }
-                if (newSession !is com.alibaba.mnnllm.android.llm.LlmSession ||
-                    !(newSession as com.alibaba.mnnllm.android.llm.LlmSession).isModelLoaded()) {
-                    newSession.load()
+                ServiceLocator.getLlmRuntimeController().withChatAttachment(newSession, runtimeLeaseEpoch) {
+                    if (!newSession.isModelLoaded()) newSession.load()
                 }
                 chatActivity.lifecycleScope.launch {
-                    onSwitchComplete(newSession)
-                    chatActivity.onLoadingChanged(false)
+                    callbackGuard.completeReset(switchToken) {
+                        if (isCurrentAttachment()) {
+                            onSwitchComplete(newSession)
+                            chatActivity.onLoadingChanged(false)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error switching model", e)
                 chatActivity.lifecycleScope.launch {
-                    onSwitchError(e)
-                    chatActivity.onLoadingChanged(false)
+                    callbackGuard.completeReset(switchToken) {
+                        if (!destroyed) {
+                            onSwitchError(e)
+                            chatActivity.onLoadingChanged(false)
+                        }
+                    }
                 }
             }
         }
@@ -475,52 +509,29 @@ class ChatPresenter(
     
     private fun destroyCurrentSession() {
         if (::chatSession.isInitialized) {
-            chatSession.reset()
-            if (chatSession is com.alibaba.mnnllm.android.llm.LlmSession) {
-                ServiceLocator.getLlmRuntimeController().releaseSession(getLlmSession(), runtimeLeaseEpoch)
-            } else {
-                chatSession.release()
-            }
+            ServiceLocator.getLlmRuntimeController().detachChatSession(chatSession, runtimeLeaseEpoch, false)
         }
     }
-    
+
     private fun createNewModelSession(newModelItem: ModelItem, currentChatHistory: List<ChatDataItem>): ChatSession {
-        val newModelId = newModelItem.modelId!!
-        val newModelName = newModelItem.modelName!!
-        if (ModelTypeUtils.isDiffusionModel(newModelName) || ModelTypeUtils.isSanaModel(newModelName)) {
-            val chatService = ChatService.provide()
-            val newConfigPath = ModelUtils.getConfigPathForModel(newModelItem)
-            val newSession = chatService.createSession(
-                newModelId, newModelName,
-                null, currentChatHistory,
-                newConfigPath, true
-            )
-            chatSession = newSession
-            sessionId = newSession.sessionId
-            chatSession.setKeepHistory(true)
-            return newSession
-        }
-        val newConfigPath = ModelUtils.getConfigPathForModel(newModelItem)
-        val result = ServiceLocator.getLlmRuntimeController().ensureSession(
-            modelId = newModelId,
-            forceReload = true,
-            useAppConfig = true,
-            configPath = newConfigPath,
-            sessionId = null,
-            historyList = currentChatHistory,
-            deferLoad = true
+        check(!destroyed) { "Chat was closed" }
+        val result = ServiceLocator.getLlmRuntimeController().ensureChatSession(
+            newModelItem.modelId!!, newModelItem.modelName!!, ModelUtils.getConfigPathForModel(newModelItem),
+            null, currentChatHistory, true, isCallerActive = { !destroyed }
         )
-        if (!result.success || result.session == null) {
-            throw IllegalStateException(result.reason ?: "Failed to ensure LLM session for model switch")
-        }
+        chatSession = result.session
         runtimeLeaseEpoch = result.chatLeaseEpoch
-        val newSession = result.session!!
-        chatSession = newSession
-        sessionId = newSession.sessionId
-        chatSession.setKeepHistory(true)
-        return newSession
+        modelId = newModelItem.modelId!!
+        modelName = newModelItem.modelName!!
+        sessionId = result.session.sessionId
+        if (destroyed) {
+            ServiceLocator.getLlmRuntimeController().detachChatSession(chatSession, runtimeLeaseEpoch,
+                com.alibaba.mnnllm.android.utils.PreferenceUtils.keepModelLoaded(chatActivity))
+            throw CancellationException("Chat was closed while switching")
+        }
+        return chatSession
     }
-    
+
     private fun updateDatabaseForModelSwitch(oldSessionId: String?, newModelId: String) {
         if (oldSessionId != null) {
             chatDataManager?.updateSessionModelId(oldSessionId, newModelId)

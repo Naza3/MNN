@@ -17,21 +17,42 @@ compatibility.
 
 ## Engine freshness and provenance
 
-`tools/local_api_ci/build-lock.json` pins the reviewed upstream engine base.
-At each job's start, `preflight.py` reads the public upstream `master` SHA once,
-requires it to equal that base, verifies ancestry and unchanged engine trees,
-and records the separate App feature SHA. If upstream has advanced, the job
-fails before building. Synchronize/rebase the feature branch, review upstream
-changes, update the engine and Sherpa source/dependency locks, and rerun the checks. Never silently substitute
-an older runtime or download a floating `libMNN.so`. Commits appearing after a
-job's initial check do not alter that job's already-frozen source.
+`tools/local_api_ci/build-lock.json` pins the reviewed official, non-prerelease
+Release: currently `3.6.1`, annotated tag object
+`ea44a3ebd5dd6348eea501047b17c43aa3ecccb6`, peeled source commit
+`d407447ed56c4121a11ccbd266dc184ca1ead0c2`. The earlier master baseline
+`024a946b0b8fcf87c8a418229fadd4cd7858ffba` is a different source revision,
+even though its version header also said 3.6.1; it is not relabeled as a Release.
 
-The primary MNN library is compiled from this checkout into
-`project/android/build_64/lib/libMNN.so`; Gradle then builds the actual App JNI
-and `mnn_tts` JNI against it. The APK audit compares native Build IDs before and
-after AGP stripping, as well as recording both hashes. No native stubs or
-prebuilt Sherpa binaries are used for the final APK. JVM/Robolectric tests are
-host tests and do not replace a real-device JNI/inference smoke test.
+At each job's start, `preflight.py` reads the official `releases/latest` once,
+rejects draft/prerelease entries, resolves the tag through any annotated tag
+objects, and compares release ID/tag/object/commit with the reviewed lock.
+A newly published Release or moved tag stops the build for review and a lock
+update. Master commits do not change this policy or this job's frozen source.
+The App feature branch and its commit remain independent; upgrading the engine
+does not reset/rebase the App or publish a Release.
+
+Preflight creates a fresh detached source checkout outside the App checkout.
+`MNN_ENGINE_SOURCE_ROOT` and `MNN_ENGINE_INSTALL_ROOT` identify that release
+source and its `project/android/build_64` install directory. Existing source
+checkouts are not reused. Restricted source areas are excluded from sparse
+materialization. The commit, complete root tree identity, relevant public tree
+objects, clean source state, release metadata and separate App SHA are recorded.
+
+Primary `libMNN.so` and Sherpa JNI are compiled from the independent official
+release source. The App's own JNI and `mnn_tts` stay on the feature commit and
+compile against the same release's headers and installed MNN library. Their
+CMake files accept explicit source/install root parameters (or environment
+fallback) while retaining upstream relative-path defaults outside this CI.
+The Gradle init script passes explicit CMake arguments so changed engine roots
+also invalidate AGP's native configuration inputs. No tracked engine directory
+in the App checkout is overwritten or silently mixed into this build.
+
+The actual APK audit checks App/TTS CMake caches and compile commands for the
+release source/install roots, rejects App-checkout engine headers, and compares
+native Build IDs before/after AGP stripping. Hashes, JNI exports and dynamic
+symbol closure are recorded. No native stubs or prebuilt Sherpa binaries are
+used for the APK. JVM/Robolectric tests do not replace real-device inference.
 
 The auxiliary Sherpa ASR JNI is also built from the same locked repository
 source. Six fixed-version source archives are pre-downloaded with exact SHA-256
@@ -83,7 +104,7 @@ weights, or private conversations in this checkout or public CI artifacts.
 
 ## Local commands
 
-Use a full checkout on the feature branch, with the above SDK packages already
+Use a full App checkout on the feature branch, with the above SDK packages already
 installed and accepted, JDK 17 selected, and enough space for both the native
 engine and Android build. Budget roughly 10–12 GiB of free disk for a cold local
 toolchain/dependency/build setup; actual use varies. A 6.9 GiB workspace can be
@@ -93,6 +114,9 @@ full build alongside CI. The lightweight helper tests need only Python 3.
 ```sh
 export ANDROID_SDK_ROOT=/path/to/android-sdk
 export REPORT_DIR="$PWD/local-api-ci-report"
+# Choose a new, nonexistent absolute directory outside the App checkout.
+export MNN_ENGINE_SOURCE_ROOT=/absolute/fresh/mnn-official-release
+export MNN_ENGINE_INSTALL_ROOT="$MNN_ENGINE_SOURCE_ROOT/project/android/build_64"
 CI_TOOLS=apps/Android/MnnLlmChat/tools/local_api_ci
 python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
 python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
@@ -109,14 +133,16 @@ python3 "$CI_TOOLS/audit_apk.py" \
 python3 "$CI_TOOLS/collect_reports.py" --report-dir "$REPORT_DIR"
 ```
 
-The native entrypoint preserves the supported upstream App feature switches.
+The native entrypoint preserves the supported App CPU/OpenCL/vision/audio/
+diffusion feature switches. KleidiAI is explicitly off to retain the previously
+validated backend scope rather than inherit the Release's different default.
 The obsolete `MNN_CPU_WEIGHT_DEQUANT_GEMM` option was removed by this engine
 version; vision/audio macros are derived from the supported OpenCV/audio
 switches. Unused upstream `BUILD_PLUGIN`/`LLM_SUPPORT_*` command-line variables
 are not passed as if they enabled features.
 
 Both native entrypoints refuse to reuse an existing CMake cache. Start a fresh
-checkout/build directory for a newly synchronized engine rather than risk stale
+release checkout/build directory for a reviewed engine upgrade rather than risk stale
 libraries. `ADD_BUILTIN=false`, `ENABLE_FIREBASE=false`, and
 `USE_LOCAL_MARKWON=false` are enforced. Existing upstream Firebase runtime
 artifacts may still be present; disabling plugins/collection does not mean all
@@ -124,6 +150,16 @@ Firebase code was removed. Signing environment variables are explicitly
 rejected. The scripts do not upload anything when run locally.
 
 ## Evidence and failure interpretation
+
+`test_engine_source.py` uses an actual tiny Git repository to exercise detached
+checkout isolation, exact commit identity, dirty-source rejection and reuse
+rejection. `verify_engine_roots.py` configures the real App/TTS CMake entrypoints
+with temporary routing inputs, checks generated include/link commands and
+explicit cache inputs, and rejects invalid roots. It compiles no native library.
+CI uses the pinned CMake 3.22.1 for this configure-only fixture; local results
+record the actual available CMake version separately in
+`engine-root-regression.json`. Actual native compatibility remains a mandatory
+subsequent compile and APK-audit gate.
 
 Before native compilation, `verify_pem_scanner.py` verifies the exact locked
 Netty binary/source archives and compiles real D8 fixtures. Netty's public
@@ -185,7 +221,7 @@ fixture credentials. Test stdout and private model/chat data are not collected.
 Artifacts are retained for 14 days. Diagnostic reports upload even on failure;
 the APK uploads only after every required test/lint/build/audit gate succeeds.
 The evidence bundle includes
-`stage-outcomes.json`, engine/App source identities, actual tool versions,
+`stage-outcomes.json`, official Release/tag/engine and separate App source identities, actual tool versions,
 `apk-manifest.xml`, XML-only resource-table metadata, APK resource-entry names,
 and the exact manifest-to-resource-ID-to-ZIP-path resolution. These static
 metadata diagnostics are retained before interpretation, including on failure;
