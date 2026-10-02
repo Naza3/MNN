@@ -1,6 +1,7 @@
 // Modified by MNN Chat API contributors, 2026: test the current row-based table renderer.
 package com.alibaba.mnnllm.android.chat.chatlist
 
+import android.graphics.Typeface
 import android.os.Looper
 import android.view.LayoutInflater
 import android.widget.FrameLayout
@@ -59,7 +60,13 @@ class AssistantMarkdownTableRenderTest {
             cells.forEachIndexed { column, text ->
                 val cell = row.getChildAt(column) as TextView
                 assertEquals(text, cell.text.toString())
-                if (rowIndex == 0) assertTrue("Table headers must be bold", cell.typeface.isBold)
+                // Robolectric's legacy Typeface shadow tracks getStyle(), while isBold()
+                // reads a native-backed field that stays unset. Assert the requested style.
+                assertEquals(
+                    "Only table headers must be bold (row=$rowIndex, column=$column)",
+                    if (rowIndex == 0) Typeface.BOLD else Typeface.NORMAL,
+                    cell.typeface.style and Typeface.BOLD
+                )
             }
         }
 

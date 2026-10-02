@@ -100,12 +100,12 @@ jobs:
         if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
         continue-on-error: true
         run: bash "$CI_TOOLS/run_gradle.sh" :app:lintStandardRelease
-      - name: Assemble unsigned standard arm64 APK and dependency inventory
+      - name: Assemble unsigned standard arm64 APK
         id: assemble
         if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
         continue-on-error: true
         run: |
-          bash "$CI_TOOLS/run_gradle.sh" :app:assembleStandardRelease :app:localApiDependencyInventory
+          bash "$CI_TOOLS/run_gradle.sh" :app:assembleStandardRelease
           bash "$CI_TOOLS/run_gradle.sh" --version > "$REPORT_DIR/gradle-version.txt"
       - name: Audit the actual APK, native closure, and 16KiB alignment
         id: audit
@@ -116,6 +116,11 @@ jobs:
           test "${#apks[@]}" -eq 1
           python3 "$CI_TOOLS/audit_apk.py" --apk "${apks[0]}" \
             --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
+      - name: Inventory original external artifacts and explicit local project variants
+        id: inventory
+        if: always() && steps.native.outcome == 'success' && steps.sherpa.outcome == 'success'
+        continue-on-error: true
+        run: bash "$CI_TOOLS/run_gradle.sh" :app:localApiDependencyInventory
       - name: Collect small reports and available license notices
         id: reports
         if: always()
@@ -129,7 +134,7 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib
           steps = json.loads(os.environ['STEP_RESULTS'])
-          expected = ['preflight', 'toolchain', 'helpers', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'reports']
+          expected = ['preflight', 'toolchain', 'helpers', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'inventory', 'reports']
           outcomes = {name: steps.get(name, {}).get('outcome', 'not_run') for name in expected}
           out = pathlib.Path(os.environ['REPORT_DIR'])
           out.mkdir(parents=True, exist_ok=True)

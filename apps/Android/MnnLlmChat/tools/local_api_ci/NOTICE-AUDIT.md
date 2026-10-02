@@ -44,7 +44,12 @@ user-selected models; symbol checks do not substitute for inference.
 ## JVM and remaining source notices
 
 `dependency-inventory.json` lists the actual resolved release-runtime artifacts
-and hashes, with available POM license declarations. `notices/` and
+and hashes, with available POM license declarations. Original external JAR/AAR
+bytes are recorded; local project classes are not misreported as Maven modules.
+`local-project-inventory.json` separately identifies the selected local Android
+runtime classes JARs, hashes, exact source commits/trees, and variant attributes.
+Its classes-only coverage is explicit; native/resource evidence is in the source
+identities and final APK audit. `notices/` and
 `notice-inventory.json` preserve available source notices and notices embedded
 in AAR/JAR artifacts. Upstream packaging excludes some META-INF license files;
 the companion bundle preserves notices it can find. Include applicable notices

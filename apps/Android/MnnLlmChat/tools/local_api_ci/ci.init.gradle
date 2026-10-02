@@ -1,6 +1,9 @@
 // Reporting and safety guards only. No source/native stubs or skipped compile tasks.
 import groovy.json.JsonOutput
 import java.security.MessageDigest
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+import org.gradle.api.attributes.Attribute
 
 def reportDirectory = System.getenv('REPORT_DIR')
 if (!reportDirectory) throw new GradleException('REPORT_DIR is required')
@@ -39,22 +42,87 @@ gradle.beforeProject { app ->
     app.tasks.matching { it.name in ['downloadAndUnzipBuiltinModels', 'copyModelInfoToMarketConfig'] }.configureEach {
         doFirst { throw new GradleException('CI must never download or bundle models (ADD_BUILTIN=false)') }
     }
+    // A project Android runtime component has many secondary artifact variants.
+    // Keep original external JAR/AAR files, and ask local projects explicitly for
+    // the classes JAR used in their runtime variant. Never use a lenient view.
+    def artifactType = Attribute.of('artifactType', String)
+    def externalView = app.providers.provider {
+        app.configurations.getByName('standardReleaseRuntimeClasspath').incoming.artifactView {
+            componentFilter { it instanceof ModuleComponentIdentifier }
+        }.artifacts
+    }
+    def localView = app.providers.provider {
+        app.configurations.getByName('standardReleaseRuntimeClasspath').incoming.artifactView {
+            componentFilter { it instanceof ProjectComponentIdentifier }
+            attributes { attribute(artifactType, 'android-classes-jar') }
+        }.artifacts
+    }
+    def unsupportedView = app.providers.provider {
+        app.configurations.getByName('standardReleaseRuntimeClasspath').incoming.artifactView {
+            componentFilter { !(it instanceof ModuleComponentIdentifier) && !(it instanceof ProjectComponentIdentifier) }
+        }.artifacts
+    }
     app.tasks.register('localApiDependencyInventory') {
+        // These inputs preserve producer task dependencies for local classes
+        // JARs, even when inventory is requested without assemble first.
+        inputs.files(externalView.map { it.artifactFiles })
+        inputs.files(localView.map { it.artifactFiles })
+        inputs.files(unsupportedView.map { it.artifactFiles })
         doLast {
-            def artifacts = app.configurations.getByName('standardReleaseRuntimeClasspath').resolvedConfiguration.resolvedArtifacts
-            def rows = artifacts.collect { artifact ->
-                def id = artifact.moduleVersion.id
+            def fileHash = { file ->
                 def digest = MessageDigest.getInstance('SHA-256')
-                artifact.file.withInputStream { input ->
+                file.withInputStream { input ->
                     byte[] buffer = new byte[65536]
                     int count
                     while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
                 }
-                [group: id.group, name: id.name, version: id.version, type: artifact.type,
-                 filename: artifact.file.name, sha256: digest.digest().encodeHex().toString()]
-            }.sort { a, b -> "${a.group}:${a.name}:${a.version}" <=> "${b.group}:${b.name}:${b.version}" }
+                digest.digest().encodeHex().toString()
+            }
+            if (!unsupportedView.get().artifacts.isEmpty()) {
+                throw new GradleException('Uninventoried non-module/non-project runtime artifacts require explicit provenance support')
+            }
+            def rows = externalView.get().artifacts.collect { artifact ->
+                def id = artifact.id.componentIdentifier
+                def type = artifact.file.name.tokenize('.').last()
+                if (!(type in ['aar', 'jar'])) throw new GradleException("Unexpected external runtime artifact type: ${artifact.file.name}")
+                [kind: 'external-module', group: id.group, name: id.module, version: id.version,
+                 type: type, filename: artifact.file.name, sha256: fileHash(artifact.file)]
+            }.sort { a, b -> "${a.group}:${a.name}:${a.version}:${a.filename}" <=> "${b.group}:${b.name}:${b.version}:${b.filename}" }
+            def localArtifacts = localView.get().artifacts
+            def localRows = []
+            if (!localArtifacts.isEmpty()) {
+                def sourceReport = new File(reportDirectory, 'source-provenance.json')
+                if (!sourceReport.isFile()) throw new GradleException('Local project source provenance is missing')
+                def source = new groovy.json.JsonSlurper().parse(sourceReport)
+                def repoRoot = app.rootProject.file('../../..').canonicalFile
+                def gitObject = { revision ->
+                    app.providers.exec {
+                        workingDir repoRoot
+                        commandLine 'git', 'rev-parse', revision
+                    }.standardOutput.asText.get().trim()
+                }
+                if (gitObject('HEAD') != source.app_commit_sha) throw new GradleException('Local project source commit changed since preflight')
+                localRows = localArtifacts.collect { artifact ->
+                    def id = artifact.id.componentIdentifier
+                    if (!id.build.isCurrentBuild()) throw new GradleException("Composite-build source provenance is not supported: ${id}")
+                    def project = app.rootProject.findProject(id.projectPath)
+                    if (project == null || !project.projectDir.canonicalFile.toPath().startsWith(repoRoot.toPath())) {
+                        throw new GradleException("Local dependency is outside the recorded source checkout: ${id}")
+                    }
+                    def path = repoRoot.toPath().relativize(project.projectDir.canonicalFile.toPath()).toString().replace('\\', '/')
+                    def attributes = artifact.variant.attributes.keySet().collectEntries { key ->
+                        [(key.name): artifact.variant.attributes.getAttribute(key).toString()]
+                    }
+                    [kind: 'local-project', project_path: id.projectPath, source_path: path,
+                     source_commit_sha: source.app_commit_sha, source_tree_sha: gitObject("${source.app_commit_sha}:${path}"),
+                     variant: artifact.variant.displayName, attributes: attributes,
+                     artifact_type: 'android-classes-jar', filename: artifact.file.name, sha256: fileHash(artifact.file),
+                     coverage: 'Local runtime classes JAR; resources/native content remain in the source tree and actual APK audit, not a complete published AAR']
+                }.sort { a, b -> a.project_path <=> b.project_path }
+            }
             new File(reportDirectory).mkdirs()
             new File(reportDirectory, 'dependency-inventory.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(rows)) + '\n'
+            new File(reportDirectory, 'local-project-inventory.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(localRows)) + '\n'
         }
     }
 }

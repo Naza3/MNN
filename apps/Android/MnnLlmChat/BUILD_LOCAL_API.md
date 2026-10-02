@@ -61,6 +61,17 @@ the configured dependency/license evidence and remaining review boundaries.
 The runner image and Maven/JitPack transitive graph are not a fully hermetic
 lockfile. The actual runtime dependency coordinates, hashes, available POM
 license declarations, tool versions, and runner-image version are recorded.
+`dependency-inventory.json` contains original external Maven JAR/AAR bytes,
+selected with a non-lenient artifact view filtered to external modules.
+`local-project-inventory.json` separately records local Android runtime classes
+JARs selected with `artifactType=android-classes-jar`, their hashes, variant
+attributes, Gradle project paths, source commit and source-tree identities.
+These classes JARs are not presented as complete published AARs: local resource
+and native inputs remain covered by their source commit and the final APK
+manifest/native audit. Unknown flat-file/composite artifact kinds fail the
+inventory rather than disappearing from the report. Assembly, APK audit, and
+inventory are separate diagnostic stages; all must pass before APK upload.
+
 The existing Markwon fork uses its upstream fixed version tag; resolution or
 JitPack failures remain real build failures rather than falling back to another
 artifact. New dependencies should use fixed versions and audited origins.
@@ -116,8 +127,13 @@ rejected. The scripts do not upload anything when run locally.
 Before native compilation, `verify_gradle_init.py` runs real Gradle against an
 SDK-free synthetic multi-project fixture with configuration-on-demand enabled.
 It verifies explicit inventory task discovery, combined assembly/inventory task
-selection, and rejection of mismatched MNN provenance. A negative control
-reproduces the former `projectsEvaluated` task-registration failure. The actual
+selection, and rejection of mismatched MNN provenance. Its non-empty dependency
+graph contains an original external JAR, a transitive external AAR, and a local
+project with multiple Android-shaped outgoing artifact variants. The test checks
+exact original external hashes, the explicitly selected local classes JAR and
+its source tree, producer task execution, and rejection of unprovenanced flat
+files. Negative controls reproduce the ambiguous untyped artifact resolution
+and the former `projectsEvaluated` task-registration failure. The actual
 init script registers tasks in `beforeProject` so task discovery is not delayed
 until after Gradle has selected the requested task graph. This fixture produces
 no Android APK or native library and is recorded in `gradle-init-regression.json`.
