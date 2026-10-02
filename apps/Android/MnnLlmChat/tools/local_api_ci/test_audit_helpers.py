@@ -4,7 +4,8 @@ import struct
 import unittest
 
 from audit_apk import (elf_load_segments, suspicious_entry, validate_manifest,
-                       validate_extraction_rules, dynamic_symbols, extraction_reference_matches)
+                       validate_extraction_rules, dynamic_symbols, resolve_extraction_resources,
+                       foreground_type_matches)
 
 LOCK = json.loads((Path(__file__).parent/'build-lock.json').read_text())
 
@@ -69,12 +70,31 @@ class AuditHelpersTest(unittest.TestCase):
         self.assertTrue(validate_extraction_rules('<data-extraction-rules><cloud-backup/><device-transfer/></data-extraction-rules>'))
         self.assertTrue(validate_extraction_rules(xml.replace('<exclude domain="sharedpref" path="."/>','')))
 
-    def test_backup_manifest_reference_cannot_point_at_other_file(self):
-        dump='resource 0x7f150005 io.github.naza3.mnnchat:xml/local_api_data_extraction_rules\n'
-        self.assertTrue(extraction_reference_matches('@ref/0x7f150005',dump))
-        self.assertTrue(extraction_reference_matches('@xml/local_api_data_extraction_rules',dump))
-        self.assertFalse(extraction_reference_matches('@ref/0x7f150006',dump))
-        self.assertFalse(extraction_reference_matches('@xml/another_rules_file',dump))
+    def test_compiled_foreground_enum_is_exact(self):
+        for value in ('specialUse', '0x40000000', '1073741824'):
+            self.assertTrue(foreground_type_matches(value, 'specialUse'))
+            self.assertEqual([], validate_manifest(manifest(service_type=value), LOCK['expected_apk'])[1])
+        for value in ('0x40000001', 'specialUse|dataSync', '0x1', '0', None, '-1', '0x400000000'):
+            self.assertFalse(foreground_type_matches(value, 'specialUse'))
+
+    def test_backup_manifest_reference_resolves_optimized_path(self):
+        dump = ('resource 0x7f150005 xml/0_resource_name_obfuscated\n'
+                '  () (file) res/aB.xml type=XML\n'
+                '  (v31) (file) res/cD.xml type=XML\n')
+        result = resolve_extraction_resources('@ref/0x7f150005', dump)
+        self.assertEqual(['res/aB.xml', 'res/cD.xml'], [v['path'] for v in result['variants']])
+        for reference in ('@ref/0x7f150006', '@xml/local_api_data_extraction_rules'):
+            with self.assertRaises(ValueError): resolve_extraction_resources(reference, dump)
+        symbolic = dump.replace('0_resource_name_obfuscated', 'local_api_data_extraction_rules')
+        self.assertEqual('0x7f150005', resolve_extraction_resources('@xml/local_api_data_extraction_rules', symbolic)['resource_id'])
+
+    def test_backup_unknown_alias_missing_default_and_unsafe_paths_rejected(self):
+        prefix = 'resource 0x7f150005 xml/rules\n'
+        for value in ('  () @0x7f150006\n', '  (v31) (file) res/good.xml type=XML\n',
+                      '  () (file) res/../bad.xml type=XML\n',
+                      '  () (file) res/good.xml type=PNG\n',
+                      '  () (file) res/good.xml type=XML\n  () (file) res/other.xml type=XML\n'):
+            with self.assertRaises(ValueError): resolve_extraction_resources('@ref/0x7f150005', prefix + value)
 
     def test_mnn_abi_required_symbols_exclude_weak_imports(self):
         exports,required=dynamic_symbols('''

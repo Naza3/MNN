@@ -65,6 +65,11 @@ jobs:
       - name: Test audit helpers with synthetic fixtures
         id: helpers
         run: python3 -m unittest discover -s "$CI_TOOLS" -p 'test_*.py' -v
+      - name: Verify compiled APK metadata and optimized resource parsing
+        id: apk_metadata
+        run: |
+          python3 "$CI_TOOLS/verify_apk_metadata.py" \
+            --sdk "$ANDROID_SDK_ROOT" --report-dir "$REPORT_DIR"
       - name: Verify Gradle CI task registration before native compilation
         id: gradle_init
         run: |
@@ -134,7 +139,7 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib
           steps = json.loads(os.environ['STEP_RESULTS'])
-          expected = ['preflight', 'toolchain', 'helpers', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'inventory', 'reports']
+          expected = ['preflight', 'toolchain', 'helpers', 'apk_metadata', 'gradle_init', 'sherpa', 'native', 'api_tests', 'all_tests', 'lint', 'assemble', 'audit', 'inventory', 'reports']
           outcomes = {name: steps.get(name, {}).get('outcome', 'not_run') for name in expected}
           out = pathlib.Path(os.environ['REPORT_DIR'])
           out.mkdir(parents=True, exist_ok=True)

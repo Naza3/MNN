@@ -124,6 +124,14 @@ rejected. The scripts do not upload anything when run locally.
 
 ## Evidence and failure interpretation
 
+Before native compilation, `verify_apk_metadata.py` builds tiny resource-only
+APKs with the locked SDK aapt2. It verifies numeric foreground-service flags,
+optimized resource names/ZIP paths, every backup XML configuration, and retained
+diagnostics on a missing ZIP entry. Negative fixtures reject combined service
+flags, a permissive referenced XML even when an unrelated correct XML exists,
+and a permissive qualified XML variant. Results are in
+`apk-metadata-regression.json`; these fixtures do not exercise App/native code.
+
 Before native compilation, `verify_gradle_init.py` runs real Gradle against an
 SDK-free synthetic multi-project fixture with configuration-on-demand enabled.
 It verifies explicit inventory task discovery, combined assembly/inventory task
@@ -149,7 +157,8 @@ feature regressions from existing upstream failures.
 
 The static APK audit checks the real package/version/min/target SDK, private
 special-use foreground service and permission/subtype declaration, disabled
-backup, ARM64-only libraries, required JNI libraries, every ELF PT_LOAD page
+backup (every compiled XML variant followed from the manifest resource ID),
+ARM64-only libraries, required JNI libraries, every ELF PT_LOAD page
 alignment, ZIP alignment, native dynamic-dependency closure, and obvious
 model/key/config material. The scanner is a defense-in-depth check, not a proof
 that arbitrary secrets can never exist in binaries. CI only uses synthetic
@@ -159,6 +168,10 @@ Artifacts are retained for 14 days. Diagnostic reports upload even on failure;
 the APK uploads only after every required test/lint/build/audit gate succeeds.
 The evidence bundle includes
 `stage-outcomes.json`, engine/App source identities, actual tool versions,
+`apk-manifest.xml`, XML-only resource-table metadata, APK resource-entry names,
+and the exact manifest-to-resource-ID-to-ZIP-path resolution. These static
+metadata diagnostics are retained before interpretation, including on failure;
+no unrelated compiled string values or test stdout are copied. The bundle also contains
 focused/full test counts, lint locations, dependency hashes/notices, native
 build options, and `apk-audit.json`. A passing build does not replace applicable
 distribution obligations or real-device validation.

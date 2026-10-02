@@ -40,6 +40,19 @@ def elf_load_segments(data):
     return segments
 
 
+def foreground_type_matches(value, expected):
+    # ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE is exactly 1 << 30.
+    # apkanalyzer renders compiled enum/flag attributes as hexadecimal integers.
+    # Equality, not a bitwise subset check, rejects specialUse | dataSync too.
+    if expected != "specialUse":
+        raise ValueError("Unsupported foreground service policy")
+    if value == expected:
+        return True
+    if not value or not re.fullmatch(r"(?:0[xX][0-9a-fA-F]+|[0-9]+)", value):
+        return False
+    return int(value, 16 if value.lower().startswith("0x") else 10) == 0x40000000
+
+
 def validate_manifest(xml, expected):
     root = ET.fromstring(xml)
     sdk = root.find("uses-sdk")
@@ -72,7 +85,7 @@ def validate_manifest(xml, expected):
     else:
         if service["exported"] != "false":
             errors.append("Local API service must explicitly be non-exported")
-        if service["foreground_service_type"] != expected["foreground_service_type"]:
+        if not foreground_type_matches(service["foreground_service_type"], expected["foreground_service_type"]):
             errors.append("Local API service must use specialUse, not a time-limited dataSync type")
         if not service["properties"].get("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"):
             errors.append("Local API special-use service requires a subtype explanation")
@@ -120,17 +133,105 @@ def validate_extraction_rules(xml):
     return errors
 
 
-def extraction_reference_matches(reference, resource_dump):
-    name = "local_api_data_extraction_rules"
-    if reference == "@xml/" + name:
-        return True
-    expected_ids = re.findall(r"resource\s+(0x[0-9a-fA-F]+)\s+[^\n]*?xml/" + name + r"(?:\s|$)", resource_dump)
-    # apkanalyzer versions may print a symbolic reference or its numeric ID.
-    value = reference.removeprefix("@").removeprefix("ref/") if reference else ""
-    try:
-        return int(value, 0) in {int(item, 16) for item in expected_ids}
-    except ValueError:
-        return False
+def xml_resource_metadata(resource_dump):
+    """Keep only XML resource metadata, never unrelated compiled string values."""
+    lines, selected = [], False
+    for line in resource_dump.splitlines():
+        if re.match(r"\s*(?:resource |type |Package )", line):
+            selected = bool(re.match(r"\s*resource 0x[0-9a-fA-F]+ (?:[^ :]+:)?xml/", line))
+        if selected:
+            lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
+def resolve_extraction_resources(reference, resource_dump):
+    """Follow the manifest's resource identity to every compiled XML variant.
+
+    Release AAPT can shorten file paths and collapse symbolic resource names.
+    Never guess a source filename or validate a different, unreferenced XML.
+    Resource aliases/unknown formats fail closed instead of being skipped.
+    """
+    resources, current = [], None
+    for line in xml_resource_metadata(resource_dump).splitlines():
+        match = re.match(r"\s*resource (0x[0-9a-fA-F]+) ([^\s]+)(?:\s.*)?$", line)
+        if match:
+            current = {"id": match[1].lower(), "name": match[2], "values": []}
+            resources.append(current)
+        elif current is not None and line.strip():
+            current["values"].append(line.strip())
+    numeric = re.fullmatch(r"@(?:ref/)?(0[xX][0-9a-fA-F]+|[0-9]+)", reference or "")
+    if numeric:
+        value = numeric[1]
+        resource_id = int(value, 16 if value.lower().startswith("0x") else 10)
+        selected = [r for r in resources if int(r["id"], 16) == resource_id]
+    else:
+        symbolic = re.fullmatch(r"@((?:[^ :/]+:)?xml/[^ /]+)", reference or "")
+        selected = [r for r in resources if symbolic and
+                    (r["name"] == symbolic[1] or
+                     (":" not in symbolic[1] and r["name"].split(":")[-1] == symbolic[1]))]
+    if len(selected) != 1:
+        raise ValueError("Manifest dataExtractionRules must resolve to exactly one XML resource ID")
+    resource, variants, configurations = selected[0], [], set()
+    for line in resource["values"]:
+        match = re.fullmatch(r"\(([^)]*)\) \(file\) ([^\s]+) type=XML", line)
+        if not match:
+            raise ValueError("Backup XML resource has an unsupported or non-file value: " + line)
+        config, path = match.groups()
+        parts = PurePosixPath(path).parts
+        if (not path.startswith("res/") or ".." in parts or "\\" in path or
+                str(PurePosixPath(path)) != path or not path.endswith(".xml")):
+            raise ValueError("Unsafe compiled backup XML path: " + path)
+        if config in configurations:
+            raise ValueError("Duplicate backup XML resource configuration: " + config)
+        configurations.add(config)
+        variants.append({"configuration": config, "path": path})
+    if "" not in configurations:
+        raise ValueError("Backup XML resource has no default configuration")
+    return {"reference": reference, "resource_id": resource["id"],
+            "resource_name": resource["name"], "variants": variants}
+
+
+def audit_compiled_manifest(apk, apkanalyzer, aapt2, report_dir, expected, report):
+    """Retain static diagnostic metadata before interpreting compiled values."""
+    report_dir.mkdir(parents=True, exist_ok=True)
+    diagnostics = report.setdefault("metadata_commands", [])
+
+    def inspect(label, *args):
+        result = subprocess.run([str(x) for x in args], capture_output=True, text=True)
+        record = {"stage": label, "returncode": result.returncode}
+        diagnostics.append(record)
+        if result.returncode:
+            # Only SDK diagnostics from this generated APK, no test/chat stdout.
+            record["diagnostic"] = (result.stderr + result.stdout)[:4096]
+            raise ValueError(f"APK metadata command failed: {label} (exit {result.returncode})")
+        return result.stdout
+
+    with zipfile.ZipFile(apk) as archive:
+        entries = [{"path": n.filename, "size": n.file_size} for n in archive.infolist()
+                   if n.filename.startswith("res/") or n.filename in {"AndroidManifest.xml", "resources.arsc"}]
+    (report_dir / "apk-resource-entries.json").write_text(json.dumps(entries, indent=2) + "\n")
+    xml = inspect("manifest_print", apkanalyzer, "manifest", "print", apk)
+    (report_dir / "apk-manifest.xml").write_text(xml)
+    resources = inspect("resource_table", aapt2, "dump", "resources", apk)
+    (report_dir / "apk-xml-resource-table.txt").write_text(xml_resource_metadata(resources))
+    manifest, errors = validate_manifest(xml, expected)
+    report["manifest"] = manifest
+    report["manifest_validation_errors"] = list(errors)
+    resolution = resolve_extraction_resources(manifest["data_extraction_rules"], resources)
+    report["data_extraction_resource"] = resolution
+    entry_names = [entry["path"] for entry in entries]
+    for index, variant in enumerate(resolution["variants"]):
+        if entry_names.count(variant["path"]) != 1:
+            raise ValueError("Backup XML ZIP entry must exist exactly once: " + variant["path"])
+        rules_xml = inspect("backup_xml_" + str(index), apkanalyzer, "resources", "xml",
+                            "--file", variant["path"], apk)
+        filename = "data-extraction-rules.xml" if not variant["configuration"] else f"data-extraction-rules-{index}.xml"
+        (report_dir / filename).write_text(rules_xml)
+        variant["decoded_report"] = filename
+        failures = validate_extraction_rules(rules_xml)
+        variant["validation"] = "failed" if failures else "passed"
+        errors.extend(f"{variant['path']} ({variant['configuration'] or 'default'}): {failure}" for failure in failures)
+    return errors
 
 
 def dynamic_symbols(text):
@@ -180,18 +281,12 @@ def main():
     build_tools = args.sdk / "build-tools" / tc["build_tools"]
     readelf = args.sdk / "ndk" / tc["ndk"] / "toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
     try:
-        xml = command(str(apkanalyzer), "manifest", "print", str(args.apk))
-        manifest, failures = validate_manifest(xml, expected)
-        report["manifest"] = manifest
-        errors.extend(failures)
-        (args.report_dir / "apk-manifest.xml").write_text(xml)
-        rules_xml = command(str(apkanalyzer), "resources", "xml", "--file",
-                            "res/xml/local_api_data_extraction_rules.xml", str(args.apk))
-        errors.extend(validate_extraction_rules(rules_xml))
-        resources = command(str(build_tools / "aapt2"), "dump", "resources", str(args.apk))
-        if not extraction_reference_matches(manifest["data_extraction_rules"], resources):
-            errors.append("Manifest does not reference the audited backup-exclusion XML resource")
-        (args.report_dir / "data-extraction-rules.xml").write_text(rules_xml)
+        try:
+            errors.extend(audit_compiled_manifest(args.apk, apkanalyzer, build_tools / "aapt2",
+                                                 args.report_dir, expected, report))
+        except (OSError, ValueError, ET.ParseError, zipfile.BadZipFile) as error:
+            # Keep auditing independent native/signature properties for diagnosis.
+            errors.append(str(error))
         alignment = command(str(build_tools / "zipalign"), "-c", "-P", "16", "-v", "4", str(args.apk))
         (args.report_dir / "zipalign.txt").write_text(alignment)
         report["zipalign_16k"] = "passed"
