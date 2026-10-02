@@ -26,8 +26,6 @@ jobs:
       CI_TOOLS: apps/Android/MnnLlmChat/tools/local_api_ci
       REPORT_DIR: ${{ github.workspace }}/local-api-ci-report
       NATIVE_JOBS: '2'
-      MNN_ENGINE_SOURCE_ROOT: ${{ runner.temp }}/mnn-official-release
-      MNN_ENGINE_INSTALL_ROOT: ${{ runner.temp }}/mnn-official-release/project/android/build_64
     steps:
       - name: Check out the exact App commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -37,7 +35,14 @@ jobs:
           submodules: false
       - name: Freeze and check out latest official stable release at job start
         id: preflight
-        run: python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
+        shell: bash
+        run: |
+          set -euo pipefail
+          export MNN_ENGINE_SOURCE_ROOT="$RUNNER_TEMP/mnn-official-release"
+          export MNN_ENGINE_INSTALL_ROOT="$MNN_ENGINE_SOURCE_ROOT/project/android/build_64"
+          printf '%s\n' "MNN_ENGINE_SOURCE_ROOT=$MNN_ENGINE_SOURCE_ROOT" \
+            "MNN_ENGINE_INSTALL_ROOT=$MNN_ENGINE_INSTALL_ROOT" >> "$GITHUB_ENV"
+          python3 "$CI_TOOLS/preflight.py" --report-dir "$REPORT_DIR"
       - name: Use JDK 17
         uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
         with:
