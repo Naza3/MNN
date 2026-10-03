@@ -36,6 +36,11 @@ Download/import models within this fork using the existing model manager.
   在同一 API 会话连续请求两次，然后 Stop/Start 后再次请求，确认 reset 和重新加载后的行为。
   当前没有连接真实手机，以上模型行为及耗时仍待验收。
 
+公开的 [taobao-mnn/Qwen3.5-2B-MNN 配置](https://huggingface.co/taobao-mnn/Qwen3.5-2B-MNN/blob/35781816d7b6a9dcb273a6765ac9563401951c3c/config.json#L28)
+在该固定版本中默认开启思考；其[实际导出模板](https://huggingface.co/taobao-mnn/Qwen3.5-2B-MNN/blob/35781816d7b6a9dcb273a6765ac9563401951c3c/llm_config.json#L24)
+明确支持 `enable_thinking=false`，通过在输入模板中预先闭合思考段引导直接回答。
+这项源码证据不代表已经核实用户手机上的模型来源、版本或实际生成行为。
+
 ## 保持模型加载（832 / localapi.2）
 
 - **设置 → 通用 → 退出聊天后保持模型加载** 默认开启，升级时缺少这个新偏好也按开启处理。

@@ -17,6 +17,31 @@ compatibility.
 
 ## Direct API answers (834 / 0.8.3-localapi.4)
 
+Source commit [`35affe5d9d94e7e843bac4daecee1d2ddf60123f`](https://github.com/Naza3/MNN/commit/35affe5d9d94e7e843bac4daecee1d2ddf60123f)
+passed [Actions run 37133978173](https://github.com/Naza3/MNN/actions/runs/37133978173)
+on 2026-10-03. Job `111234601171` ran from 15:38:55 to 16:03:16 UTC (24m 21s).
+The engine/Sherpa builds, API and full App tests, release lint, unsigned assembly,
+APK audit, dependency inventory, separate test signing and artifact uploads all
+passed. These are build/static/JVM results, not phone inference measurements.
+
+Download the ZIP while signed in to GitHub and extract its contents:
+
+- [Unsigned arm64 APK](https://github.com/Naza3/MNN/actions/runs/37133978173/artifacts/11278242921):
+  `app-standard-release-unsigned.apk`. If the existing installation was self-signed,
+  sign this file with the same original key before updating. Do not replace that
+  identity with the CI test key or uninstall the existing App to force an update.
+  ZIP size: 30,446,758 bytes; GitHub ZIP SHA-256:
+  `21e1bcff5d764c23cf07b491b3fceb4805b27cd2b66be5f01821f5147d27b1bb`.
+- [Separate CI-test-signed APK and checksum](https://github.com/Naza3/MNN/actions/runs/37133978173/artifacts/11278482493):
+  for installations using the dedicated CI testing identity. This signer is not
+  known to match existing self-signed installations.
+- [Audit reports and source/notices bundle](https://github.com/Naza3/MNN/actions/runs/37133978173/artifacts/11278497383):
+  retain alongside redistributed APKs. Includes the unsigned audit and separate
+  public signing certificate/digest report.
+
+These artifacts expire on 2026-10-17 at approximately 16:03 UTC. ZIP digests
+describe GitHub's archive, not the extracted APK or a subsequently re-signed APK.
+
 API sessions explicitly apply `jinja.context.enable_thinking=false` after native
 load succeeds, because model `context.json` is also merged during native load.
 The override is session-only: it does not write model/custom configuration or
