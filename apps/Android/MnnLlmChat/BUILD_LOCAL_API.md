@@ -23,6 +23,10 @@ on 2026-10-03. Job `111234601171` ran from 15:38:55 to 16:03:16 UTC (24m 21s).
 The engine/Sherpa builds, API and full App tests, release lint, unsigned assembly,
 APK audit, dependency inventory, separate test signing and artifact uploads all
 passed. These are build/static/JVM results, not phone inference measurements.
+The archived logs/reports confirm 51 helper tests (including six real SDK signing
+fixtures), 85 focused API tests and 531 full App tests (including the focused
+tests), with zero failures/errors/skips. Report provenance matches the App commit
+above and locked engine `d407447ed56c4121a11ccbd266dc184ca1ead0c2`.
 
 Download the ZIP while signed in to GitHub and extract its contents:
 
@@ -32,6 +36,9 @@ Download the ZIP while signed in to GitHub and extract its contents:
   identity with the CI test key or uninstall the existing App to force an update.
   ZIP size: 30,446,758 bytes; GitHub ZIP SHA-256:
   `21e1bcff5d764c23cf07b491b3fceb4805b27cd2b66be5f01821f5147d27b1bb`.
+  The unsigned APK audit records 32,547,449 bytes and APK SHA-256
+  `ee492c538460b1a6796adf7e91e6eeb7c0f9670f534f741a47e3564fb8bb00ba`;
+  re-signing changes that APK digest.
 - [Separate CI-test-signed APK and checksum](https://github.com/Naza3/MNN/actions/runs/37133978173/artifacts/11278482493):
   for installations using the dedicated CI testing identity. This signer is not
   known to match existing self-signed installations.
