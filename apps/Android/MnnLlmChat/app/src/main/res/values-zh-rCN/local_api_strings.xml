@@ -2,7 +2,7 @@
 <!-- Copyright (c) 2026 MNN Chat API contributors. Licensed under Apache-2.0. -->
 <resources>
     <string name="local_api_title">本机 API</string>
-    <string name="local_api_description">为本机应用提供纯文本推理。API 运行期间暂停聊天与基准测试。Android 可能终止进程，届时需手动重新启动。</string>
+    <string name="local_api_description">为本机应用提供纯文本推理。API 默认关闭模型思考，不跟随聊天页的思考设置。API 运行期间暂停聊天与基准测试。Android 可能终止进程，届时需手动重新启动。</string>
     <string name="local_api_select_model">请先打开已下载的文本模型，再选择 API 设置</string>
     <string name="local_api_model_url">模型：%1$s\n\n接口地址：http://127.0.0.1:%2$d/v1\n</string>
     <string name="local_api_port_hint">端口（1024–65535）</string>

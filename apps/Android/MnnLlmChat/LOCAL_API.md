@@ -1,7 +1,7 @@
 # MNN Chat API (local-only fork)
 
 This fork uses package `io.github.naza3.mnnchat`, display name **MNN Chat API**, and version
-`0.8.3-localapi.3` (833). Its Android/JNI namespace stays unchanged. It installs beside the
+`0.8.3-localapi.4` (834). Its Android/JNI namespace stays unchanged. It installs beside the
 upstream app, does not migrate/read its private data, and does not offer upstream APK updates.
 Download/import models within this fork using the existing model manager.
 
@@ -20,6 +20,21 @@ Download/import models within this fork using the existing model manager.
   最多一项推理、一项排队；超额返回 429。不支持工具调用、多模态、文件读取或 `/v1/messages`。
 - Android 的省电、低内存或强制停止仍可能结束进程；不会自动后台重启或重放请求。
   真机安装、原生推理及息屏运行仍需设备验收，JVM 测试通过不代表已做过手机实测。
+
+## API 直接回答模式（834 / localapi.4）
+
+- 本机 API 会话现在独立设置 `jinja.context.enable_thinking=false`，不继承聊天页的思考开关。
+  设置在原生模型加载完成后应用，避免模型加载期间的 `context.json` 覆盖它。
+- 这是模型会话配置，不是只隐藏生成的思考文本，也不依靠提示词中的“不要思考”。
+  不修改模型文件或聊天 `custom_config`；普通聊天仍使用自己的设置。
+- 安装此版本后先停止旧 API、等待清理完成，再重新启动；后续请求的 reset 不撤销该会话设置。
+  地址、API Key、模型名称、`max_tokens` 与普通／流式协议保持原有规则。
+- 生效仍取决于模型模板支持 `enable_thinking`。不声称任意模板都能关闭思考；不能把编译通过当成真实模型验证。
+  不通过删除返回文本中的思考段或伪造 `finish_reason=stop` 掩盖超限。
+- 复测 Qwen3.5-2B-MNN：先执行只回复 OK 的连接测试，再用两条短消息做通用总结（无补充要求），
+  保留 Telegram 的 2000 tokens／32000 字符预算，分别记录思考提示、实际正文与耗时。
+  在同一 API 会话连续请求两次，然后 Stop/Start 后再次请求，确认 reset 和重新加载后的行为。
+  当前没有连接真实手机，以上模型行为及耗时仍待验收。
 
 ## 保持模型加载（832 / localapi.2）
 

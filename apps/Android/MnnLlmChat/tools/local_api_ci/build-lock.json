@@ -138,8 +138,8 @@
       "libmnn_tts.so",
       "libsherpa-mnn-jni.so"
     ],
-    "version_code": "833",
-    "version_name": "0.8.3-localapi.3"
+    "version_code": "834",
+    "version_name": "0.8.3-localapi.4"
   },
   "public_test_fixture": {
     "coordinate": "io.netty:netty-handler:4.1.119.Final",

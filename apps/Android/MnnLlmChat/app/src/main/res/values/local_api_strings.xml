@@ -2,7 +2,7 @@
 <!-- Copyright (c) 2026 MNN Chat API contributors. Licensed under Apache-2.0. -->
 <resources>
     <string name="local_api_title">Local API</string>
-    <string name="local_api_description">Text-only inference for apps on this phone. Chat and benchmark are paused while the API is running. Android may stop the process; restart manually if needed.</string>
+    <string name="local_api_description">Text-only inference for apps on this phone. API requests use thinking-disabled mode independently of Chat settings. Chat and benchmark are paused while the API is running. Android may stop the process; restart manually if needed.</string>
     <string name="local_api_select_model">Open a downloaded text model in Chat, then choose API settings</string>
     <string name="local_api_model_url">Model: %1$s\n\nBase URL: http://127.0.0.1:%2$d/v1\n</string>
     <string name="local_api_port_hint">Port (1024–65535)</string>

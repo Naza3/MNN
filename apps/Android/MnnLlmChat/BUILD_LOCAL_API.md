@@ -15,6 +15,22 @@ part of this build. Compiling these features is not proof of on-device GPU/NPU
 execution, inference quality, background survival, or Android 16KiB runtime
 compatibility.
 
+## Direct API answers (834 / 0.8.3-localapi.4)
+
+API sessions explicitly apply `jinja.context.enable_thinking=false` after native
+load succeeds, because model `context.json` is also merged during native load.
+The override is session-only: it does not write model/custom configuration or
+change chat preferences. Request reset keeps the loaded template configuration;
+Stop/Start creates a new API session and reapplies the override. The engine,
+toolchain, package ID, output-token limits and HTTP contract are unchanged.
+
+This sets the template's thinking policy rather than merely filtering generated
+text. It requires a model template that supports `enable_thinking`. App compilation
+and the existing API/lifecycle regression suite do not prove real model behavior.
+Validate Qwen3.5-2B with the same two short messages, checking the first request,
+a second request after reset, and a request after Stop/Start. Record answer text,
+thinking detection and elapsed time separately; see `LOCAL_API.md`.
+
 ## Background text generation (833 / 0.8.3-localapi.3)
 
 User-started text chat generation is owned by an application-scoped job and
@@ -143,7 +159,10 @@ installed and accepted, JDK 17 selected, and enough space for both the native
 engine and Android build. Budget roughly 10–12 GiB of free disk for a cold local
 toolchain/dependency/build setup; actual use varies. A 6.9 GiB workspace can be
 too tight, so inspect existing SDK/cache space first and do not launch a duplicate
-full build alongside CI. The lightweight helper tests need only Python 3.
+full build alongside CI. The non-signing helper tests need only Python 3.
+Signing regressions also require the locked SDK packages and JDK tools; they
+use resource-only APK fixtures rather than models or native libraries. Missing
+tools skip those fixtures locally but fail them in GitHub Actions.
 
 ```sh
 export ANDROID_SDK_ROOT=/path/to/android-sdk
@@ -275,16 +294,24 @@ distribution obligations or real-device validation.
 
 ## Signing and device acceptance
 
-CI produces an unsigned standard release APK for `io.github.naza3.mnnchat`.
-No keystore or private signing material is uploaded. Keep the accompanying
-source/notices bundle with any APK handed to another recipient. Sign and
-re-verify the APK in a controlled local environment before installation; calculate the
-signed APK's new SHA-256 and record its signer certificate. The person shipping
-future production releases must own and preserve their release key. This
-workflow does not promise a production signing identity or compatibility with
-the official MNN Chat application's signature.
+CI preserves the audited unsigned standard release APK for `io.github.naza3.mnnchat`
+and, after its gates pass, creates a separate signed testing copy. Signing is
+outside Gradle; the unsigned-input audit and its recorded hash are unchanged.
+The dedicated CI testing key is cached independently and is never passed to
+Gradle or uploaded as an artifact. The signed APK is checked with `apksigner`,
+16KiB `zipalign`, original ZIP payload comparison and a separate SHA-256.
+Only its public certificate information belongs in the reports.
 
-Before declaring device acceptance, install the locally signed arm64 build and
+Keep the accompanying source/notices bundle with any APK handed to another
+recipient. A testing key does not establish a production signing identity. Cache
+loss can create a new test signer, and this key is not known to match an APK
+previously signed elsewhere. Android can update an existing installation only
+with a matching signer; use the original key to sign the unsigned artifact when
+necessary. Do not uninstall a working installation just to work around a signing
+mismatch: uninstalling can remove its model and conversation data. The person
+shipping future production releases must own and preserve their release key.
+
+Before declaring device acceptance, install a compatible signed arm64 build and
 verify loopback-only binding, bearer-key rejection/rotation, API routes and SSE,
 stop/restart and request cancellation, one-owner UI/API runtime arbitration,
 notification controls, background/locked-screen behavior, and the real selected

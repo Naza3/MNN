@@ -127,7 +127,7 @@ object DefaultLlmRuntimeController : LlmRuntimeController {
             ?: return@transition EnsureSessionResult(false, reason = "MODEL_CONFIG_NOT_FOUND")
         try {
             val session = LlmSession(modelId, "local_api_$apiEpoch", path, null,
-                useCustomConfig = false, apiEpoch = apiEpoch)
+                useCustomConfig = false, apiEpoch = apiEpoch, thinkingEnabledOverride = false)
             session.setKeepHistory(false)
             session.load()
             EnsureSessionResult(true, session, modelId)

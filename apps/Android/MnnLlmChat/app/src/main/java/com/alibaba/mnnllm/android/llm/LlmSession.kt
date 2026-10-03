@@ -31,7 +31,9 @@ class LlmSession (
     var savedHistory: List<ChatDataItem>?,
     var backendType: String? = null,
     private val useCustomConfig: Boolean = true,
-    private val apiEpoch: Long? = null
+    private val apiEpoch: Long? = null,
+    // Session-only override; null preserves the selected model/chat configuration.
+    private val thinkingEnabledOverride: Boolean? = null
 ): ChatSession{
     override var supportOmni: Boolean = false
     @Volatile private var nativePtr: Long = 0
@@ -153,6 +155,14 @@ class LlmSession (
             if (nativePtr == 0L) {
                 Log.e(TAG, "Model load failed - native initialization returned null pointer")
                 throw IllegalStateException("Model load failed - the model module could not be loaded")
+            }
+            thinkingEnabledOverride?.let { enabled ->
+                // Native load() also reads context_file. Apply after initNative so that
+                // model context defaults cannot overwrite this explicit session policy.
+                // Do not call updateThinking(): it persists the UI custom_config.json.
+                checkAccess()
+                val overrides = mapOf("jinja" to Jinja(context = JinjaContext(enableThinking = enabled)))
+                updateConfigNative(nativePtr, Gson().toJson(overrides))
             }
         } catch (error: Throwable) {
             try { release() } catch (cleanup: Throwable) { error.addSuppressed(cleanup) }
