@@ -15,7 +15,88 @@ part of this build. Compiling these features is not proof of on-device GPU/NPU
 execution, inference quality, background survival, or Android 16KiB runtime
 compatibility.
 
-## Direct API answers (834 / 0.8.3-localapi.4)
+## Expanded input limits (835 / 0.8.3-localapi.5)
+
+App source [`31c522bae695d9390ee47fcc2532a9cce044f86d`](https://github.com/Naza3/MNN/commit/31c522bae695d9390ee47fcc2532a9cce044f86d)
+sets versionCode `835` / versionName `0.8.3-localapi.5` and passed
+[Actions run 37175086947](https://github.com/Naza3/MNN/actions/runs/37175086947)
+on 2026-10-04. Job `111355941824` ran from 03:47:49 to 04:13:42 UTC (25m 53s).
+The complete run spans 03:47:47 to its final update at 04:13:43 UTC (25m 56s).
+Every required stage succeeded, including both native builds, focused and full App tests,
+release lint, unsigned assembly, actual APK audit, dependency inventory, final failure gate,
+separate test signing and artifact uploads. The compiled manifest confirms version 835 / `.5`.
+
+The archived logs and reports confirm:
+
+| CI check | Actual result |
+|---|---|
+| Audit/build helpers | 51 tests passed, including six real SDK signing fixtures |
+| Focused API suite | 19 suites, 88 tests; zero failures/errors/skips |
+| Full App suite | 81 suites, 534 tests, including focused tests; zero failures/errors/skips |
+| `LocalApiRoutesTest` | All 9 tests ran and passed in both summaries |
+| APK audit and signing | No audit errors; ARM64 package, v2/v3 signatures, 16 KiB alignment and unchanged ZIP payload verified |
+| Source provenance | App `31c522bae695d9390ee47fcc2532a9cce044f86d`; engine remains `d407447ed56c4121a11ccbd266dc184ca1ead0c2`, freshness `current` |
+
+The original `mnn-local-api-ci-test-signing-v1` cache was hit and restored. The public test
+certificate SHA-256 is unchanged from version 834's run 37133978173:
+`0f5d6080a2af6433e3d6c60f009ec2b335e59590b84526170ef1d13d4da1823b`.
+This confirms the same MNN CI testing identity, not a match to a separately self-signed APK.
+
+Download these **version 835** ZIPs while signed in to GitHub, then extract their contents:
+
+- [CI-test-signed arm64 APK and checksum](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11294005611)
+  (artifact `11294005611`): `MNN-Chat-API-arm64-ci-test.apk`.
+  Extracted APK SHA-256: `d9e1944d3ec8da6a6578c4398ca2121e9b848fdbf07d2cd384a6c5925b449954`.
+  ZIP size: 30,449,191 bytes; ZIP SHA-256:
+  `ad446cbb5dc159cb4c487461153424b73b39338432a668615488c47da46131ae`.
+  Expires 2026-10-18 04:13:38 UTC.
+- [Audited unsigned arm64 APK](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11293926119)
+  (artifact `11293926119`): `app-standard-release-unsigned.apk`, 32,547,669 bytes.
+  Extracted APK SHA-256: `0821fd2aa8aeaef5cb369efea75cb1f3a026291fabe4ee988ddccd3169fe0cec`.
+  ZIP size: 30,446,946 bytes; ZIP SHA-256:
+  `100377e2a9a7f29cfce6b013ef90c8e376d4e95200269143ffff57ac1790cd6a`.
+  Expires 2026-10-18 04:13:36 UTC. Use the original signing key when updating a separately
+  self-signed installation; signing changes the extracted APK hash.
+- [Audit reports and source/notices bundle](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11293467113)
+  (artifact `11293467113`): 4,791,283 bytes; expires 2026-10-18 04:13:35 UTC.
+  ZIP SHA-256: `3ada38fe745a119c0add7b10b3f67e70798fbebe35565ed8c3b29c4914ee8065`.
+
+ZIP hashes describe GitHub's archive, not the extracted or subsequently re-signed APK.
+The independent log/report review is recorded at
+`/workspace/build-logs/mnn-compact-64k/mnn-ci/review-summary.json`. This CI loaded no real
+phone model and does not establish inference quality or performance. Version 834 artifacts
+in the following section remain separate evidence for their original source and limits.
+
+This version raises two independent API admission limits: the complete UTF-8 JSON request
+body may be at most **256 KiB (262144 bytes)**, and decoded `system`/`user`/`assistant` text
+combined may be at most **65536 UTF-16 code units**. Message count stays 1–64. JSON escaping
+can exceed the byte limit even when decoded text fits. Output `max_tokens` stays **1–2048,
+default 512**; the model's actual context configuration is unchanged.
+
+Telegram's corresponding input-character budget is **2048–64000, default 6000** and includes
+its rules, direction and output reserve. To send inputs beyond the previous 32768-character
+or 64 KiB-body limits, install the updated MNN App, stop the API, wait for cleanup, and start
+it again. Raising the client budget alone cannot change an older running server's limits.
+
+Local evidence for this source is preserved at
+`/workspace/build-logs/mnn-input-limits/validation-summary.json`:
+
+| Check | Result and scope |
+|---|---|
+| Production `LocalApiRoutesTest` | 9 passed in an isolated JVM project using exact production source copies |
+| Scratch `TelegramWireFixtureTest` | 1 passed through real Ktor `testApplication` and a fake inference backend |
+| APK-audit helpers | 22 passed |
+| Old-limit negative control | All 3 boundary checks failed as expected after restoring the old guards in a scratch copy; production files were untouched |
+| Version and build lock | Both identify 835 / `0.8.3-localapi.5` |
+
+The harness used Kotlin 2.1.21, Ktor 3.1.3, JDK 21 and Android 35's `android.jar`. Its wire
+fixtures accepted 142363-byte mixed input and 192126-byte Chinese input, while rejecting
+384081 bytes of escaped controls. Positive XML reports are retained separately from the
+expected failing negative-control report. These local checks did not build a complete App,
+load a native model, or measure phone inference. The CI results above cover the full App
+build and automated checks; real-device acceptance remains outstanding.
+
+## Previous build: direct API answers (834 / 0.8.3-localapi.4)
 
 Source commit [`35affe5d9d94e7e843bac4daecee1d2ddf60123f`](https://github.com/Naza3/MNN/commit/35affe5d9d94e7e843bac4daecee1d2ddf60123f)
 passed [Actions run 37133978173](https://github.com/Naza3/MNN/actions/runs/37133978173)
@@ -28,7 +109,9 @@ fixtures), 85 focused API tests and 531 full App tests (including the focused
 tests), with zero failures/errors/skips. Report provenance matches the App commit
 above and locked engine `d407447ed56c4121a11ccbd266dc184ca1ead0c2`.
 
-Download the ZIP while signed in to GitHub and extract its contents:
+The following downloads are **version 834**, with the earlier 64 KiB request-body and 32768
+decoded-text limits. They do not contain the version 835 input-limit change. Download the ZIP
+while signed in to GitHub and extract its contents:
 
 - [Unsigned arm64 APK](https://github.com/Naza3/MNN/actions/runs/37133978173/artifacts/11278242921):
   `app-standard-release-unsigned.apk`. If the existing installation was self-signed,

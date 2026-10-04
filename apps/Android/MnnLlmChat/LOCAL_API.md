@@ -1,7 +1,7 @@
 # MNN Chat API (local-only fork)
 
 This fork uses package `io.github.naza3.mnnchat`, display name **MNN Chat API**, and version
-`0.8.3-localapi.4` (834). Its Android/JNI namespace stays unchanged. It installs beside the
+`0.8.3-localapi.5` (835). Its Android/JNI namespace stays unchanged. It installs beside the
 upstream app, does not migrate/read its private data, and does not offer upstream APK updates.
 Download/import models within this fork using the existing model manager.
 
@@ -20,6 +20,36 @@ Download/import models within this fork using the existing model manager.
   最多一项推理、一项排队；超额返回 429。不支持工具调用、多模态、文件读取或 `/v1/messages`。
 - Android 的省电、低内存或强制停止仍可能结束进程；不会自动后台重启或重放请求。
   真机安装、原生推理及息屏运行仍需设备验收，JVM 测试通过不代表已做过手机实测。
+
+## 输入接收上限（835 / localapi.5）
+
+- HTTP 请求体上限为 **256 KiB（262144 字节）**，按实际 UTF-8 JSON 请求体计数，包含字段、
+  引号和转义。`messages` 仍为 1–64 条；其中 `system`、`user`、`assistant` 解码后的正文
+  合计最多 **65536 个 UTF-16 代码单元**。普通中文通常计一个，补充平面字符如多数 emoji 计两个。
+- 这两道限制独立检查。正文字符数合格，仍可能因 JSON 转义等超过请求体字节上限；不能用
+  文件大小或模型 token 数替代正文计数。
+- 对应 Telegram 群总结的输入字符预算可设为 **2048–64000，默认 6000**。该预算还会扣除
+  系统规则、总结方向和输出预留，剩余部分才用于消息；它是客户端的保守规划值。
+  使用超过旧版 32768 字符或 64 KiB 请求体的输入，需安装 835 或更新版本，并停止 API、
+  等待清理完成后重新启动。旧版 834 的服务仍执行旧限制。
+- `max_tokens` 保持 **1–2048，默认 512**，仍应用于原生生成。提高输入预算不会提高输出上限。
+  MNN 返回 `Invalid request: max_tokens must be 1..2048` 时，应把客户端最大输出设为 2048 或更小。
+- 本次调整只扩大 API 接收范围，没有修改模型配置或真实上下文窗口。较长请求能否完成以及
+  内存、预填充和生成耗时，仍取决于实际加载的模型和设备。
+
+本轮 App 源码为 [`31c522bae695d9390ee47fcc2532a9cce044f86d`](https://github.com/Naza3/MNN/commit/31c522bae695d9390ee47fcc2532a9cce044f86d)。
+[835 构建 run 37175086947](https://github.com/Naza3/MNN/actions/runs/37175086947)
+已于 2026-10-04 成功：51 项构建辅助测试、19 个套件的 88 项 API 专项测试，以及包含这些
+专项测试的 81 个套件、534 项全 App 测试，均无失败、错误或跳过。Lint、组装、实际 APK 审计
+和独立测试签名也通过；包内版本确认为 835 / `0.8.3-localapi.5`。
+
+- [下载 835 CI 测试签名 APK 和校验文件](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11294005611)。
+  公开证书与旧版 834 的 MNN CI 测试证书一致，继续使用原 `mnn-local-api-ci-test-signing-v1` 缓存。
+- [下载 835 未签名 APK](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11293926119)。
+  若现有安装是自行签名的，应使用原密钥签名；CI 测试证书一致不代表它与自行签名的安装一致。
+- 测试签名副本的 v2/v3 验签、16 KiB ZIP 对齐和原始文件内容一致性检查通过。
+  裸 APK 与下载 ZIP 的 SHA-256 是不同值，完整哈希、大小、到期时间及报告见
+  [BUILD_LOCAL_API.md](BUILD_LOCAL_API.md)。真机模型推理与性能仍待验收。
 
 ## API 直接回答模式（834 / localapi.4）
 
@@ -142,7 +172,9 @@ curl http://127.0.0.1:8080/v1/chat/completions \
 - 1 active native request + 1 waiting, FIFO. Excess requests get `429`; unavailable/stopping
   service gets `503` where a listener still exists. A stopped listener refuses connections
 - Default `max_tokens=512`, accepted range 1–2048, actually applied to the native session
-- Maximum request body 64 KiB; 1–64 messages, total text at most 32768 characters; generated
+- Maximum request body **256 KiB (262144 UTF-8 bytes)**; 1–64 messages. Decoded text across
+  all `system`, `user` and `assistant` messages totals at most **65536 UTF-16 code units**.
+  Body bytes and decoded text are separate limits; generated
   response at most 1,048,576 UTF-16 code units. These are safety bounds, not model context promises
 - Supported roles: system/user/assistant. Unsupported generation parameters, tools/function
   calling, media content and MNN media markup are rejected. No caller-selected files or URLs
@@ -188,6 +220,16 @@ limits/auth/routes, real Netty TCP close for streaming and non-streaming calls, 
 manifest/Activity control lifecycle. Tests use ephemeral fake keys and no model downloads.
 Run `:app:testStandardDebugUnitTest` in the configured
 Android build. The full CI also builds the current pinned MNN sources and the APK.
+
+For version 835, an isolated JVM harness compiled exact production route/queue/runtime copies
+with Kotlin 2.1.21, Ktor 3.1.3, JDK 21 and Android 35's `android.jar`. It passed nine
+`LocalApiRoutesTest` tests and one scratch `TelegramWireFixtureTest`, using real Ktor
+`testApplication` with fake inference. The wire fixture accepted 142363-byte mixed-text and
+192126-byte Chinese payloads, and rejected a 384081-byte escaped-control payload at the
+independent body limit. All 22 APK-audit helper tests passed. Restoring both old input guards
+only in the scratch copy made all three new boundary checks fail as expected. The local
+evidence is `/workspace/build-logs/mnn-input-limits/validation-summary.json`; these results
+cover routing and input validation, without loading a native model or running on a phone.
 
 **Device acceptance remains required:** install this fork beside the official app, download a
 small supported text model, test actual text/SSE and token limits, background the Activity,
