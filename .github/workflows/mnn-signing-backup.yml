@@ -1,0 +1,57 @@
+name: Preserve MNN 835 signing identity
+
+on:
+  push:
+    branches: [feature/mnn-chat-local-api]
+    paths:
+      - '.github/workflows/mnn-signing-backup.yml'
+      - 'tools/mnn_signing_backup/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mnn-signing-backup-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  encrypted-backup:
+    if: github.repository == 'Naza3/MNN' && github.ref == 'refs/heads/feature/mnn-chat-local-api'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out reviewed backup tools and public recipient key
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Use JDK 17 for certificate verification
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Test encryption and rejection of invalid backups
+        run: node --test tools/mnn_signing_backup/backup.test.mjs
+      - name: Restore only the existing signing cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/mnn-local-api-test-signing/
+          key: mnn-local-api-ci-test-signing-v1
+          fail-on-cache-miss: true
+      - name: Verify the 835 signer and encrypt its existing keystore
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/mnn-signing-backup"
+          node tools/mnn_signing_backup/backup.mjs encrypt \
+            --keystore "$RUNNER_TEMP/mnn-local-api-test-signing/test.p12" \
+            --recipient tools/mnn_signing_backup/recipient-public.pem \
+            --expected-sha256 0f5d6080a2af6433e3d6c60f009ec2b335e59590b84526170ef1d13d4da1823b \
+            --output "$RUNNER_TEMP/mnn-signing-backup/mnn-835-signing-key.encrypted.json"
+      - name: Upload only the encrypted backup
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mnn-835-encrypted-signing-backup-${{ github.run_id }}
+          path: ${{ runner.temp }}/mnn-signing-backup/mnn-835-signing-key.encrypted.json
+          if-no-files-found: error
+          retention-days: 30
