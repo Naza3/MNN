@@ -16,6 +16,11 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
+// Independent transport and decoded-text guards, not the model's token context size.
+private const val MAX_REQUEST_BODY_BYTES = 256 * 1024
+// Kotlin String.length counts UTF-16 code units, matching the Telegram client's budget.
+private const val MAX_MESSAGE_CHARACTERS = 65_536
+
 /** Registers only the bounded, text-only local API. Legacy media/messages/test-page routes are not exposed. */
 fun Application.localApiModule(queue: BoundedInferenceQueue, modelId: String,
                                keyProvider: () -> String, ready: () -> Boolean = { true },
@@ -127,7 +132,9 @@ internal fun parseLocalPrompt(body: String, modelId: String): LocalPrompt {
     }
     require(!Regex("<\\s*/?\\s*(img|image|audio|video)\\b", RegexOption.IGNORE_CASE).containsMatchIn(history.joinToString("") { it.second })) { "Media markup is not supported" }
     require(history.any { it.first == "user" }) { "A user message is required" }
-    require(history.sumOf { it.second.length } <= 32768) { "Message text exceeds 32768 characters" }
+    require(history.sumOf { it.second.length } <= MAX_MESSAGE_CHARACTERS) {
+        "Message text exceeds $MAX_MESSAGE_CHARACTERS characters"
+    }
     return LocalPrompt(history, tokens, request["stream"]?.jsonPrimitive?.boolean ?: false)
 }
 
@@ -138,7 +145,7 @@ private suspend fun ApplicationCall.readLimitedBody(): String {
     while (true) {
         val n = input.readAvailable(buffer, 0, buffer.size)
         if (n == -1) break
-        require(output.size() + n <= 65536) { "Request exceeds 64 KiB" }
+        require(output.size() + n <= MAX_REQUEST_BODY_BYTES) { "Request exceeds 256 KiB" }
         output.write(buffer, 0, n)
     }
     return output.toString("UTF-8")
