@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Sign a separate, already-audited APK with the dedicated cached CI test identity.
+# Sign a separate, already-audited APK with the pinned existing CI test identity.
 # This is not a production signing entrypoint; no signing environment reaches Gradle.
 set -euo pipefail
 umask 077
-if [[ $# -ne 4 ]]; then
-  echo 'Usage: sign_test_apk.sh UNSIGNED_APK TEST_KEYSTORE OUTPUT_DIR REPORT_DIR' >&2
+if [[ $# -ne 5 ]]; then
+  echo 'Usage: sign_test_apk.sh UNSIGNED_APK TEST_KEYSTORE OUTPUT_DIR REPORT_DIR EXPECTED_CERTIFICATE_SHA256' >&2
   exit 2
 fi
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +13,11 @@ APK="$1"
 TEST_KEYSTORE="$2"
 OUTPUT_DIR="$3"
 REPORT_DIR="$4"
+EXPECTED_CERTIFICATE_SHA256="$5"
+[[ "$EXPECTED_CERTIFICATE_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+  echo 'Expected certificate SHA-256 must contain exactly 64 hexadecimal digits' >&2
+  exit 2
+}
 BUILD_TOOLS="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["toolchain"]["build_tools"])' "$HERE/build-lock.json")"
 APKSIGNER="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS/apksigner"
 ZIPALIGN="$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS/zipalign"
@@ -49,9 +54,10 @@ trap 'rm -rf -- "$WORK"' EXIT
   --v4-signing-enabled false --out "$WORK/$FILENAME" "$APK"
 "$APKSIGNER" verify --verbose --print-certs "$WORK/$FILENAME" > "$WORK/signature.txt"
 "$ZIPALIGN" -c -P 16 -v 4 "$WORK/$FILENAME" > "$WORK/zipalign.txt"
-python3 - "$APK" "$WORK/$FILENAME" "$WORK/signature.txt" "$REPORT_DIR" <<'PY'
+python3 - "$APK" "$WORK/$FILENAME" "$WORK/signature.txt" "$REPORT_DIR" "$EXPECTED_CERTIFICATE_SHA256" <<'PY'
 import hashlib, json, pathlib, re, sys, zipfile
-original, signed, certificate, report = map(pathlib.Path, sys.argv[1:])
+original, signed, certificate, report = map(pathlib.Path, sys.argv[1:5])
+expected = sys.argv[5].lower()
 with zipfile.ZipFile(original) as before, zipfile.ZipFile(signed) as after:
     if before.namelist() != after.namelist():
         raise SystemExit('Signing changed APK archive entries')
@@ -64,6 +70,8 @@ if len(fingerprints) != 1 or any(
         'Verified using '+scheme+' scheme (APK Signature Scheme '+scheme+'): true' not in text
         for scheme in ['v2', 'v3']):
     raise SystemExit('Expected exactly one verified v2/v3 test signing certificate')
+if fingerprints[0].lower() != expected:
+    raise SystemExit('Signed APK certificate does not match the pinned signing identity')
 sha = hashlib.sha256(signed.read_bytes()).hexdigest()
 signed.with_suffix('.apk.sha256').write_text(sha+'  '+signed.name+'\n')
 (report/'signed-test-apk.json').write_text(json.dumps({

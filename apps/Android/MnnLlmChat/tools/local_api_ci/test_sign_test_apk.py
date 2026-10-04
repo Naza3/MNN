@@ -51,6 +51,10 @@ class TestApkSigning(unittest.TestCase):
                          '-keystore', cls.key, '-alias', 'mnn-local-api-ci-test',
                          '-storepass', 'android', '-keypass', 'android', '-keyalg', 'RSA',
                          '-keysize', '2048', '-validity', '2', '-dname', 'CN=Synthetic CI Test'])
+        certificate = subprocess.run(['keytool', '-exportcert', '-keystore', str(cls.key),
+                                      '-alias', 'mnn-local-api-ci-test', '-storepass', 'android'],
+                                     capture_output=True, timeout=30, check=True).stdout
+        cls.fingerprint = hashlib.sha256(certificate).hexdigest()
 
     @staticmethod
     def run_command(command):
@@ -71,9 +75,10 @@ class TestApkSigning(unittest.TestCase):
         audit.update(changes)
         (self.report / 'apk-audit.json').write_text(json.dumps(audit))
 
-    def sign(self, apk=None, key=None, output=None):
+    def sign(self, apk=None, key=None, output=None, fingerprint=None):
         return subprocess.run(['bash', str(HERE / 'sign_test_apk.sh'), str(apk or self.apk),
-                               str(key or self.key), str(output or self.output), str(self.report)],
+                               str(key or self.key), str(output or self.output), str(self.report),
+                               self.fingerprint if fingerprint is None else fingerprint],
                               capture_output=True, text=True, timeout=30)
 
     def assert_rejected(self, result):
@@ -93,6 +98,7 @@ class TestApkSigning(unittest.TestCase):
         self.assertEqual(hashlib.sha256(apk.read_bytes()).hexdigest(),
                          apk.with_suffix('.apk.sha256').read_text().split()[0])
         report = json.loads((self.report / 'signed-test-apk.json').read_text())
+        self.assertEqual(self.fingerprint, report['certificate_sha256'])
         self.assertTrue(report['archive_payload_unchanged'])
         self.assertEqual(['v2', 'v3'], report['verified_signature_schemes'])
         self.assertEqual(original, hashlib.sha256(self.apk.read_bytes()).digest())
@@ -119,6 +125,23 @@ class TestApkSigning(unittest.TestCase):
         missing = self.case / 'missing.p12'
         self.assert_rejected(self.sign(key=missing))
         self.assertFalse(missing.exists())
+
+    def test_valid_but_wrong_signing_identity_cannot_be_published(self):
+        result = self.sign(fingerprint='0' * 64)
+        self.assert_rejected(result)
+        self.assertIn('does not match the pinned signing identity', result.stderr)
+        self.assertFalse((self.report / 'signed-test-apk.json').exists())
+        self.assertFalse((self.report / 'signed-test-apk-certificate.txt').exists())
+
+    def test_certificate_pin_is_required_and_cannot_be_disabled(self):
+        for invalid in ['', 'false', '*', '0' * 63, '0' * 65, 'z' * 64]:
+            with self.subTest(invalid=invalid):
+                self.assert_rejected(self.sign(fingerprint=invalid))
+        missing = subprocess.run(['bash', str(HERE / 'sign_test_apk.sh'), str(self.apk),
+                                  str(self.key), str(self.output), str(self.report)],
+                                 capture_output=True, text=True, timeout=30)
+        self.assert_rejected(missing)
+        self.assertIn('EXPECTED_CERTIFICATE_SHA256', missing.stderr)
 
     def test_existing_signature_is_not_replaced(self):
         first = self.sign(output=self.case / 'already-signed')

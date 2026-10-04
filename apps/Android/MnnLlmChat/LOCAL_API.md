@@ -44,12 +44,23 @@ Download/import models within this fork using the existing model manager.
 和独立测试签名也通过；包内版本确认为 835 / `0.8.3-localapi.5`。
 
 - [下载 835 CI 测试签名 APK 和校验文件](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11294005611)。
-  公开证书与旧版 834 的 MNN CI 测试证书一致，继续使用原 `mnn-local-api-ci-test-signing-v1` 缓存。
+  此次构建命中了原 `mnn-local-api-ci-test-signing-v1` 缓存，公开证书与旧版 834 一致。
 - [下载 835 未签名 APK](https://github.com/Naza3/MNN/actions/runs/37175086947/artifacts/11293926119)。
   若现有安装是自行签名的，应使用原密钥签名；CI 测试证书一致不代表它与自行签名的安装一致。
 - 测试签名副本的 v2/v3 验签、16 KiB ZIP 对齐和原始文件内容一致性检查通过。
   裸 APK 与下载 ZIP 的 SHA-256 是不同值，完整哈希、大小、到期时间及报告见
   [BUILD_LOCAL_API.md](BUILD_LOCAL_API.md)。真机模型推理与性能仍待验收。
+
+后续构建固定复用 `.5` 的开发签名证书，SHA-256 为
+`0f5d6080a2af6433e3d6c60f009ec2b335e59590b84526170ef1d13d4da1823b`。
+优先读取仓库 Secret `MNN_SIGNING_KEYSTORE_BASE64`；它应是原始完整 `test.p12`
+文件的无换行 Base64，不是 MNN API 密钥。Secret 有值但无效时直接失败，不回退；
+只有 Secret 缺失时才使用精确缓存。两者都不可用或证书不匹配时停止构建，不自动生成新密钥。
+原密钥 alias 为 `mnn-local-api-ci-test`，存储及私钥密码均为既有开发密码 `android`。
+仓库所有者需在
+[Actions Secrets 设置](https://github.com/Naza3/MNN/settings/secrets/actions)手动填写。
+请保留私有离线备份，不把私钥、Base64 或明文副本放入仓库、构建 artifacts、日志或聊天。
+具体步骤见 [固定签名说明](BUILD_LOCAL_API.md#preserve-the-existing-5-signing-identity)。
 
 ## API 直接回答模式（834 / localapi.4）
 

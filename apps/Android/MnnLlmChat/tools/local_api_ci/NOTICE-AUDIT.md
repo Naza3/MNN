@@ -87,4 +87,7 @@ collection are disabled, but upstream still declares Firebase dependencies;
 inspect the actual inventory and merged manifest before describing them.
 
 QNN is off. No proprietary QNN asset, model weights, model license, user API
-key, signing key, or user conversation is supplied by this workflow.
+key, or user conversation is supplied by this workflow. The separate signing
+step restores and verifies the pinned existing development key from the repository
+Secret or exact cache; private signing material is never included in the APK,
+audit reports or uploaded artifacts. See [the signing procedure](../../BUILD_LOCAL_API.md#preserve-the-existing-5-signing-identity).

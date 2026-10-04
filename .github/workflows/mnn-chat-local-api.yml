@@ -54,33 +54,21 @@ jobs:
         with:
           path: ${{ runner.temp }}/mnn-local-api-test-signing/
           key: mnn-local-api-ci-test-signing-v1
-      - name: Prepare a development-only test signing identity
+      - name: Prepare the pinned existing test signing identity
         id: test_key
         env:
+          MNN_SIGNING_KEYSTORE_BASE64: ${{ secrets.MNN_SIGNING_KEYSTORE_BASE64 }}
           CACHE_HIT: ${{ steps.test_key_cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
-          umask 077
-          key_dir="$RUNNER_TEMP/mnn-local-api-test-signing"
-          mkdir -p "$key_dir"
-          if [[ "$CACHE_HIT" == 'true' ]]; then
-            test -s "$key_dir/test.p12"
-          else
-            test ! -e "$key_dir/test.p12"
-            keytool -genkeypair -noprompt -storetype PKCS12 \
-              -keystore "$key_dir/test.p12" -alias mnn-local-api-ci-test \
-              -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname 'CN=MNN Local API CI Test,OU=Development,O=MNN Chat API,C=CN'
+          if [[ -z "$MNN_SIGNING_KEYSTORE_BASE64" && "$CACHE_HIT" != 'true' ]]; then
+            echo 'The pinned signing Secret or an exact signing-key cache hit is required.' >&2
+            exit 1
           fi
-          chmod 600 "$key_dir/test.p12"
-          keytool -list -keystore "$key_dir/test.p12" -storepass android \
-            -alias mnn-local-api-ci-test > /dev/null
-      - name: Cache the CI test key before the build
-        if: steps.test_key_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ runner.temp }}/mnn-local-api-test-signing/
-          key: mnn-local-api-ci-test-signing-v1
+          python3 "$CI_TOOLS/prepare_signing_key.py" \
+            --cache-keystore "$RUNNER_TEMP/mnn-local-api-test-signing/test.p12" \
+            --output "$RUNNER_TEMP/mnn-local-api-prepared-signing/test.p12" \
+            --expected-sha256 0f5d6080a2af6433e3d6c60f009ec2b335e59590b84526170ef1d13d4da1823b
       - name: Install exact Android packages using existing runner licenses
         id: toolchain
         shell: bash
@@ -216,8 +204,9 @@ jobs:
           mapfile -t apks < <(find apps/Android/MnnLlmChat/app/build/outputs/apk/standard/release -maxdepth 1 -name '*-unsigned.apk' -type f)
           test "${#apks[@]}" -eq 1
           bash "$CI_TOOLS/sign_test_apk.sh" "${apks[0]}" \
-            "$RUNNER_TEMP/mnn-local-api-test-signing/test.p12" \
-            "$RUNNER_TEMP/mnn-local-api-signed-apk" "$REPORT_DIR"
+            "$RUNNER_TEMP/mnn-local-api-prepared-signing/test.p12" \
+            "$RUNNER_TEMP/mnn-local-api-signed-apk" "$REPORT_DIR" \
+            0f5d6080a2af6433e3d6c60f009ec2b335e59590b84526170ef1d13d4da1823b
       - name: Upload auditable reports (no credentials or user data)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -261,5 +250,5 @@ jobs:
               output.write('[Download signed APK and SHA-256]('+os.environ['ARTIFACT_URL']+')\n\n')
               output.write('- APK SHA-256: `'+report['signed_apk_sha256']+'`\n')
               output.write('- Public certificate SHA-256: `'+report['certificate_sha256']+'`\n')
-              output.write('\nThis is a dedicated cached test key, not the installed App\'s known signing identity. An update requires matching certificates; cache loss creates a different identity. The keystore is never uploaded as an artifact.\n')
+              output.write('\nThe signing identity is pinned to the MNN 0.8.3-localapi.5 test certificate. The repository Secret is preferred; only its absence permits the exact existing cache. Missing or mismatched keys fail the build without generating a replacement. The plaintext keystore is never uploaded as an artifact.\n')
           PY

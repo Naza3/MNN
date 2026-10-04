@@ -5,7 +5,8 @@
 The dedicated `MNN Chat local API test build` workflow runs only in `Naza3/MNN`
 on `feature/mnn-chat-local-api`, for changes under this App or its own workflow.
 It does not alter `master`, create tags, publish releases, enable inherited
-workflows, or receive signing/API secrets. Initial execution uses the feature
+workflows, or receive user API/production signing secrets. A dedicated preparation
+step can receive the existing development signing key described below. Initial execution uses the feature
 branch push event; GitHub's manual dispatch UI requires the workflow to exist
 on the default branch, and is not a reason to change that branch.
 
@@ -412,15 +413,84 @@ distribution obligations or real-device validation.
 CI preserves the audited unsigned standard release APK for `io.github.naza3.mnnchat`
 and, after its gates pass, creates a separate signed testing copy. Signing is
 outside Gradle; the unsigned-input audit and its recorded hash are unchanged.
-The dedicated CI testing key is cached independently and is never passed to
-Gradle or uploaded as an artifact. The signed APK is checked with `apksigner`,
+The dedicated CI testing key is never passed to Gradle or uploaded in plaintext as an artifact.
+The signed APK is checked with `apksigner`,
 16KiB `zipalign`, original ZIP payload comparison and a separate SHA-256.
 Only its public certificate information belongs in the reports.
 
+### Preserve the existing `.5` signing identity
+
+Future CI builds require the same certificate used by version 835 /
+`0.8.3-localapi.5`, whose SHA-256 is:
+
+```text
+0f5d6080a2af6433e3d6c60f009ec2b335e59590b84526170ef1d13d4da1823b
+```
+
+The existing development keystore is `test.p12`, with alias
+`mnn-local-api-ci-test`, store password `android` and key password `android`.
+These are the existing development-signing settings, not a production-key setup
+or the MNN API Bearer key. Preserve the original file; a newly generated key with
+the same alias and passwords has a different certificate and cannot replace it.
+
+The workflow selects and verifies the existing key as follows:
+
+1. A nonempty repository Secret named `MNN_SIGNING_KEYSTORE_BASE64` takes priority.
+   Its value must be the canonical Base64 encoding of the **complete original
+   binary `test.p12` file**, without line breaks, spaces, quotes or PEM headers.
+   A malformed Secret, wrong password, missing private-key entry or mismatched
+   certificate fails the build; it never falls back to the cache.
+2. Only when the Secret is absent or empty may CI use an **exact hit** for cache
+   `mnn-local-api-ci-test-signing-v1`. The cached key must pass the same alias,
+   private-key-entry and certificate checks.
+3. If neither valid source exists, the build fails. CI never generates a new key
+   or silently changes signing identity. It writes the verified key under
+   `runner.temp` with mode `0600`, and verifies the final APK certificate against
+   the same fixed fingerprint after signing.
+
+To save the Secret manually, open [Naza3/MNN Actions secrets settings](https://github.com/Naza3/MNN/settings/secrets/actions),
+choose **New repository secret** (or update the existing one), enter
+`MNN_SIGNING_KEYSTORE_BASE64` as the name and paste the complete no-newline value.
+This needs repository permission to manage Actions secrets; the repository owner
+must complete this UI step. Changing workflow code alone does not create the Secret.
+
+For example, generate the value on a trusted local computer into a private file
+outside the checkout, without printing it to a terminal or CI log:
+
+```sh
+python3 - /private/path/test.p12 /private/path/test.p12.b64 <<'PY'
+import base64, os, pathlib, sys
+encoded = base64.b64encode(pathlib.Path(sys.argv[1]).read_bytes())
+fd = os.open(sys.argv[2], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'wb') as output:
+    output.write(encoded)
+PY
+```
+
+Read that local file privately to paste its contents into GitHub, then securely
+remove the temporary copy when no longer needed. Base64 is encoding, not
+encryption. Keep an access-controlled offline backup of the original `test.p12`
+and its public fingerprint: Actions caches may be evicted, and GitHub does not
+let the owner read back a saved Secret. Never commit the keystore, its Base64
+value or any plaintext private-key material, upload it as a workflow artifact,
+or copy it into logs/reports. Do not place the private key in a shared chat.
+
+The [encrypted backup job](https://github.com/Naza3/MNN/actions/runs/37182161601)
+recovered the existing 835 identity from the exact cache. Its artifact contains
+only an AES-256-GCM encrypted keystore; the random encryption key is wrapped with
+RSA-OAEP-SHA256 for a recipient whose private key remains outside GitHub. The
+artifact expires after 30 days and does not replace an offline backup or Secret.
+Local verification decrypted the backup, passed it through the Secret preparation
+path, and signed a synthetic resource-only APK using the real Android SDK. The
+resulting v2/v3 signer matched the published 835 APK; the published APK was unchanged.
+All 66 CI helper tests and 18 encryption/rejection tests passed. This validates
+signing and backup handling, without claiming a new full App build or phone test.
+
 Keep the accompanying source/notices bundle with any APK handed to another
 recipient. A testing key does not establish a production signing identity. Cache
-loss can create a new test signer, and this key is not known to match an APK
-previously signed elsewhere. Android can update an existing installation only
+loss without the valid Secret now stops the build; it cannot create a replacement
+signer. This key is not known to match an APK previously signed elsewhere.
+Android can update an existing installation only
 with a matching signer; use the original key to sign the unsigned artifact when
 necessary. Do not uninstall a working installation just to work around a signing
 mismatch: uninstalling can remove its model and conversation data. The person
